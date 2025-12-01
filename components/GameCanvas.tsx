@@ -1,13 +1,16 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { 
-  GameState, Player, Enemy, Projectile, Particle, ExpOrb, 
-  WeaponType, DamageText, GameStats, WeaponInstance, UpgradeOption, UpgradeType 
+import React, { useRef, useEffect, useCallback } from 'react';
+import {
+  GameState, Player, Enemy, Projectile, Particle, ExpOrb,
+  WeaponType, DamageText, GameStats, WeaponInstance, UpgradeOption, UpgradeType
 } from '../types';
-import { 
-  CANVAS_WIDTH, CANVAS_HEIGHT, COLORS, INITIAL_PLAYER_STATS, 
-  WEAPON_DEFINITIONS, MAX_ENEMIES, SPRITES, SPRITE_PALETTE, SPRITE_SCALE, ENEMY_DEFINITIONS, WAVE_DURATION 
+import {
+  CANVAS_WIDTH, CANVAS_HEIGHT, COLORS, INITIAL_PLAYER_STATS,
+  WEAPON_DEFINITIONS, MAX_ENEMIES, SPRITES, SPRITE_PALETTE, SPRITE_SCALE, ENEMY_DEFINITIONS, WAVE_DURATION
 } from '../constants';
 import { audioService } from '../services/audioService';
+import { useInput } from '../hooks/useInput';
+import { updateEnemyAI } from '../systems/enemyAI';
+import { processWeapon } from '../systems/weaponSystem';
 
 interface GameCanvasProps {
   gameState: GameState;
@@ -43,17 +46,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const atmosphereParticlesRef = useRef<{x: number, y: number, r: number, speed: number, alpha: number}[]>([]); // New: Ash/Snow
   const expOrbsRef = useRef<ExpOrb[]>([]);
   const textsRef = useRef<DamageText[]>([]);
-  const keysPressed = useRef<{ [key: string]: boolean }>({});
-  const mouseRef = useRef<{ x: number, y: number, down: boolean }>({ x: 0, y: 0, down: false });
-  
-  // Touch refs
-  const touchRefs = useRef<{
-    joystick: { id: number, startX: number, startY: number, currX: number, currY: number, active: boolean, dx: number, dy: number },
-    aim: { id: number, active: boolean }
-  }>({
-    joystick: { id: -1, startX: 0, startY: 0, currX: 0, currY: 0, active: false, dx: 0, dy: 0 },
-    aim: { id: -1, active: false }
-  });
+
+  // Use extracted input hook
+  const { keysPressed, mouseRef, touchRefs, getMovementInput, isDodgePressed } = useInput(canvasRef, gameState, setGameState);
 
   const frameCountRef = useRef(0);
   const waveRef = useRef(1);
@@ -114,142 +109,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       }
   }, [gameState]);
 
-  // --- Input ---
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      keysPressed.current[e.code] = true;
-      if (e.code === 'Escape') {
-        if (gameState === GameState.PLAYING) setGameState(GameState.PAUSED);
-        else if (gameState === GameState.PAUSED) setGameState(GameState.PLAYING);
-      }
-    };
-    const handleKeyUp = (e: KeyboardEvent) => {
-      keysPressed.current[e.code] = false;
-    };
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!canvasRef.current) return;
-      const rect = canvasRef.current.getBoundingClientRect();
-      const scaleX = CANVAS_WIDTH / rect.width;
-      const scaleY = CANVAS_HEIGHT / rect.height;
-      mouseRef.current.x = (e.clientX - rect.left) * scaleX;
-      mouseRef.current.y = (e.clientY - rect.top) * scaleY;
-    };
-    const handleMouseDown = () => { mouseRef.current.down = true; };
-    const handleMouseUp = () => { mouseRef.current.down = false; };
-
-    // Touch Handlers
-    const handleTouchStart = (e: TouchEvent) => {
-      if (e.target !== canvasRef.current) return;
-      e.preventDefault();
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const scaleX = CANVAS_WIDTH / rect.width;
-      const scaleY = CANVAS_HEIGHT / rect.height;
-
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        const t = e.changedTouches[i];
-        const touchX = (t.clientX - rect.left) * scaleX;
-        const touchY = (t.clientY - rect.top) * scaleY;
-
-        // Left half for Joystick
-        if (touchX < CANVAS_WIDTH / 2 && !touchRefs.current.joystick.active) {
-            touchRefs.current.joystick.id = t.identifier;
-            touchRefs.current.joystick.startX = touchX;
-            touchRefs.current.joystick.startY = touchY;
-            touchRefs.current.joystick.currX = touchX;
-            touchRefs.current.joystick.currY = touchY;
-            touchRefs.current.joystick.active = true;
-            touchRefs.current.joystick.dx = 0;
-            touchRefs.current.joystick.dy = 0;
-        } 
-        // Right half for Aim
-        else if (touchX >= CANVAS_WIDTH / 2) {
-            mouseRef.current.x = touchX;
-            mouseRef.current.y = touchY;
-            mouseRef.current.down = true;
-            touchRefs.current.aim.id = t.identifier;
-            touchRefs.current.aim.active = true;
-        }
-      }
-    };
-
-    const handleTouchMove = (e: TouchEvent) => {
-      if (e.target !== canvasRef.current) return;
-      e.preventDefault();
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const scaleX = CANVAS_WIDTH / rect.width;
-      const scaleY = CANVAS_HEIGHT / rect.height;
-
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        const t = e.changedTouches[i];
-        const touchX = (t.clientX - rect.left) * scaleX;
-        const touchY = (t.clientY - rect.top) * scaleY;
-
-        if (t.identifier === touchRefs.current.joystick.id) {
-          touchRefs.current.joystick.currX = touchX;
-          touchRefs.current.joystick.currY = touchY;
-          let dx = touchX - touchRefs.current.joystick.startX;
-          let dy = touchY - touchRefs.current.joystick.startY;
-          // Normalize if vector is too large (max 50px stick)
-          const dist = Math.hypot(dx, dy);
-          touchRefs.current.joystick.dx = dx;
-          touchRefs.current.joystick.dy = dy;
-        } 
-        else if (t.identifier === touchRefs.current.aim.id) {
-          mouseRef.current.x = touchX;
-          mouseRef.current.y = touchY;
-        }
-      }
-    };
-
-    const handleTouchEnd = (e: TouchEvent) => {
-      e.preventDefault();
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        const t = e.changedTouches[i];
-        if (t.identifier === touchRefs.current.joystick.id) {
-          touchRefs.current.joystick.active = false;
-          touchRefs.current.joystick.dx = 0;
-          touchRefs.current.joystick.dy = 0;
-          touchRefs.current.joystick.id = -1;
-        }
-        else if (t.identifier === touchRefs.current.aim.id) {
-          mouseRef.current.down = false;
-          touchRefs.current.aim.active = false;
-          touchRefs.current.aim.id = -1;
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('mouseup', handleMouseUp);
-    
-    // Add non-passive listeners to canvas for preventDefault
-    const canvas = canvasRef.current;
-    if (canvas) {
-      canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
-      canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
-      canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
-      canvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
-    }
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('mouseup', handleMouseUp);
-      if (canvas) {
-        canvas.removeEventListener('touchstart', handleTouchStart);
-        canvas.removeEventListener('touchmove', handleTouchMove);
-        canvas.removeEventListener('touchend', handleTouchEnd);
-        canvas.removeEventListener('touchcancel', handleTouchEnd);
-      }
-    };
-  }, [gameState, setGameState]);
+  // Input handling is now in useInput hook
 
   // --- Upgrades ---
   useEffect(() => {
@@ -553,33 +413,24 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     const inputMult = player.debuffs.confused > 0 ? -1 : 1;
 
-    if ((keysPressed.current['Space'] || keysPressed.current['KeyZ']) && player.dodgeCooldown <= 0) {
+    // Dodge handling using extracted input helpers
+    if (isDodgePressed() && player.dodgeCooldown <= 0) {
       player.isDodging = true;
-      player.dodgeCooldown = 60; 
-      player.invincibility = 20; 
-      
-      let dx = 0, dy = 0;
-      if (keysPressed.current['ArrowUp'] || keysPressed.current['KeyW']) dy = -1 * inputMult;
-      if (keysPressed.current['ArrowDown'] || keysPressed.current['KeyS']) dy = 1 * inputMult;
-      if (keysPressed.current['ArrowLeft'] || keysPressed.current['KeyA']) dx = -1 * inputMult;
-      if (keysPressed.current['ArrowRight'] || keysPressed.current['KeyD']) dx = 1 * inputMult;
-      
-      // Virtual joystick priority
-      if (touchRefs.current.joystick.active) {
-         dx = touchRefs.current.joystick.dx * inputMult;
-         dy = touchRefs.current.joystick.dy * inputMult;
-      }
+      player.dodgeCooldown = 60;
+      player.invincibility = 20;
+
+      let { dx, dy } = getMovementInput(inputMult);
 
       if (dx === 0 && dy === 0) {
-          dx = Math.cos(Math.atan2(mouseRef.current.y - player.y, mouseRef.current.x - player.x));
-          dy = Math.sin(Math.atan2(mouseRef.current.y - player.y, mouseRef.current.x - player.x));
+        dx = Math.cos(Math.atan2(mouseRef.current.y - player.y, mouseRef.current.x - player.x));
+        dy = Math.sin(Math.atan2(mouseRef.current.y - player.y, mouseRef.current.x - player.x));
       }
-      
+
       const len = Math.hypot(dx, dy);
       if (len > 0) {
-         player.x += (dx/len) * 120; 
-         player.y += (dy/len) * 120;
-         createParticles(player.x, player.y, 8, '#ffffff');
+        player.x += (dx / len) * 120;
+        player.y += (dy / len) * 120;
+        createParticles(player.x, player.y, 8, '#ffffff');
       }
       audioService.playDash();
     }
@@ -588,27 +439,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     if (player.invincibility > 0) player.invincibility--;
     if (player.invincibility <= 0) player.isDodging = false;
 
+    // Movement handling using extracted input helpers
     if (!player.isDodging) {
-      let dx = 0, dy = 0;
-      if (keysPressed.current['ArrowUp'] || keysPressed.current['KeyW']) dy = -1 * inputMult;
-      if (keysPressed.current['ArrowDown'] || keysPressed.current['KeyS']) dy = 1 * inputMult;
-      if (keysPressed.current['ArrowLeft'] || keysPressed.current['KeyA']) { dx = -1 * inputMult; player.direction = -1 * inputMult; }
-      if (keysPressed.current['ArrowRight'] || keysPressed.current['KeyD']) { dx = 1 * inputMult; player.direction = 1 * inputMult; }
-      
-      // Virtual Joystick Override
-      if (touchRefs.current.joystick.active) {
-          dx = touchRefs.current.joystick.dx * inputMult;
-          dy = touchRefs.current.joystick.dy * inputMult;
-          // Set direction based on joystick x
-          if (touchRefs.current.joystick.dx !== 0) {
-              player.direction = touchRefs.current.joystick.dx < 0 ? -1 * inputMult : 1 * inputMult;
-          }
-      }
+      const { dx, dy } = getMovementInput(inputMult);
 
       if (dx !== 0 || dy !== 0) {
         const len = Math.hypot(dx, dy);
         player.x += (dx / len) * player.stats.speed;
         player.y += (dy / len) * player.stats.speed;
+        // Set direction based on movement
+        if (dx !== 0) {
+          player.direction = dx < 0 ? -1 : 1;
+        }
       }
       player.direction = mouseRef.current.x < player.x ? -1 : 1;
     }

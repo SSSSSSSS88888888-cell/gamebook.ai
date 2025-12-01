@@ -58,8 +58,8 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="relative w-full h-screen bg-neutral-900 flex items-center justify-center p-4 overflow-hidden select-none" style={{ touchAction: 'none' }}>
-      <div className="relative w-full max-w-[800px] aspect-[4/3] bg-black shadow-2xl rounded-lg overflow-hidden ring-4 ring-neutral-800">
+    <div className="relative w-full h-screen bg-gradient-to-b from-[#0a0a2e] via-[#0f0f1a] to-[#0a0a1a] flex items-center justify-center p-4 overflow-hidden select-none" style={{ touchAction: 'none' }}>
+      <div className="relative w-full max-w-[800px] aspect-[4/3] bg-[#0a0a1a] shadow-2xl overflow-hidden pixel-border pulse-border rounded-sm">
         
         {/* Game Render Layer */}
         {gameState !== GameState.MENU && gameState !== GameState.GAME_SELECT && gameState !== GameState.NOVEL_READER && (
@@ -117,9 +117,9 @@ const App: React.FC = () => {
         <div className="absolute inset-0 pointer-events-none bg-gradient-to-tr from-black/40 via-transparent to-black/40 mix-blend-multiply"></div>
       </div>
       
-      {/* Footer Info */}
-      <div className="absolute bottom-4 text-neutral-600 text-xs font-pixel opacity-50">
-        DAZAI ROGUE - TOSHO YUGIJO
+      {/* Footer Info - 80s Retro Style */}
+      <div className="absolute bottom-4 font-pixel text-[10px] text-[#00f5ff] opacity-60 neon-cyan-glow">
+        ★ TOSHO YUGIJO ★ RETRO LITERATURE QUEST ★
       </div>
     </div>
   );

@@ -118,8 +118,8 @@ const App: React.FC = () => {
       </div>
       
       {/* Footer Info - 80s Retro Style */}
-      <div className="absolute bottom-4 font-pixel text-[10px] text-[#00f5ff] opacity-60 neon-cyan-glow">
-        ★ TOSHO YUGIJO ★ RETRO LITERATURE QUEST ★
+      <div className="absolute bottom-4 font-pixel text-[10px] text-[#00f5ff] opacity-70 neon-cyan-glow">
+        ★ GameBook.ai ★ RETRO LITERATURE RPG ★
       </div>
     </div>
   );

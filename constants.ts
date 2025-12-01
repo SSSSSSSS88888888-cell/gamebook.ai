@@ -99,6 +99,26 @@ export const WEAPON_DEFINITIONS: {[key in WeaponType]: WeaponDefinition} = {
     color: '#f472b6',
     range: 70,
     isManual: false
+  },
+  [WeaponType.SHUKI]: {
+    name: 'Memoir Pages (手記)',
+    description: '【自動】傷つくほど強くなる手記の切れ端。',
+    baseDamage: 8,
+    baseCooldown: 50,
+    scaling: 'rangedDamage',
+    color: '#fef3c7',
+    range: 300,
+    isManual: false
+  },
+  [WeaponType.KAMEN]: {
+    name: 'False Mask (仮面)',
+    description: '【自動】敵弾を吸収し反射する道化の仮面。',
+    baseDamage: 0,
+    baseCooldown: 0,
+    scaling: 'rangedDamage',
+    color: '#e879f9',
+    range: 50,
+    isManual: false
   }
 };
 
@@ -412,6 +432,27 @@ export const SPRITES = {
     "..VVVVVVVVVVVV..",
     "..VVV..VV..VVV..",
     "..VV...VV...VV.."
+  ],
+  // --- NEW WEAPON SPRITES ---
+  SHUKI_PAGE: [
+    "................",
+    "....WWWWWW......",
+    "....WHHHHHW.....",
+    "....WHHHHHW.....",
+    "....WHHHHHW.....",
+    "....WHHHHHW.....",
+    "....WWWWWW......",
+    "................"
+  ],
+  KAMEN_MASK: [
+    "................",
+    ".....MMMM.......",
+    "....MMMMMMM.....",
+    "...MMXMMXMMM....",
+    "...MMMMMMMM.....",
+    "....MMWWMM......",
+    ".....MMMM.......",
+    "................"
   ]
 };
 

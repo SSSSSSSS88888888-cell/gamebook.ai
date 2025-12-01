@@ -1,13 +1,16 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { 
-  GameState, Player, Enemy, Projectile, Particle, ExpOrb, 
-  WeaponType, DamageText, GameStats, WeaponInstance, UpgradeOption, UpgradeType 
+import React, { useRef, useEffect, useCallback } from 'react';
+import {
+  GameState, Player, Enemy, Projectile, Particle, ExpOrb,
+  WeaponType, DamageText, GameStats, WeaponInstance, UpgradeOption, UpgradeType
 } from '../types';
-import { 
-  CANVAS_WIDTH, CANVAS_HEIGHT, COLORS, INITIAL_PLAYER_STATS, 
-  WEAPON_DEFINITIONS, MAX_ENEMIES, SPRITES, SPRITE_PALETTE, SPRITE_SCALE, ENEMY_DEFINITIONS, WAVE_DURATION 
+import {
+  CANVAS_WIDTH, CANVAS_HEIGHT, COLORS, INITIAL_PLAYER_STATS,
+  WEAPON_DEFINITIONS, MAX_ENEMIES, SPRITES, SPRITE_PALETTE, SPRITE_SCALE, ENEMY_DEFINITIONS, WAVE_DURATION
 } from '../constants';
 import { audioService } from '../services/audioService';
+import { useInput } from '../hooks/useInput';
+import { updateEnemyAI } from '../systems/enemyAI';
+import { processWeapon } from '../systems/weaponSystem';
 
 interface GameCanvasProps {
   gameState: GameState;
@@ -43,17 +46,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const atmosphereParticlesRef = useRef<{x: number, y: number, r: number, speed: number, alpha: number}[]>([]); // New: Ash/Snow
   const expOrbsRef = useRef<ExpOrb[]>([]);
   const textsRef = useRef<DamageText[]>([]);
-  const keysPressed = useRef<{ [key: string]: boolean }>({});
-  const mouseRef = useRef<{ x: number, y: number, down: boolean }>({ x: 0, y: 0, down: false });
-  
-  // Touch refs
-  const touchRefs = useRef<{
-    joystick: { id: number, startX: number, startY: number, currX: number, currY: number, active: boolean, dx: number, dy: number },
-    aim: { id: number, active: boolean }
-  }>({
-    joystick: { id: -1, startX: 0, startY: 0, currX: 0, currY: 0, active: false, dx: 0, dy: 0 },
-    aim: { id: -1, active: false }
-  });
+
+  // Use extracted input hook
+  const { keysPressed, mouseRef, touchRefs, getMovementInput, isDodgePressed } = useInput(canvasRef, gameState, setGameState);
 
   const frameCountRef = useRef(0);
   const waveRef = useRef(1);
@@ -114,142 +109,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       }
   }, [gameState]);
 
-  // --- Input ---
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      keysPressed.current[e.code] = true;
-      if (e.code === 'Escape') {
-        if (gameState === GameState.PLAYING) setGameState(GameState.PAUSED);
-        else if (gameState === GameState.PAUSED) setGameState(GameState.PLAYING);
-      }
-    };
-    const handleKeyUp = (e: KeyboardEvent) => {
-      keysPressed.current[e.code] = false;
-    };
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!canvasRef.current) return;
-      const rect = canvasRef.current.getBoundingClientRect();
-      const scaleX = CANVAS_WIDTH / rect.width;
-      const scaleY = CANVAS_HEIGHT / rect.height;
-      mouseRef.current.x = (e.clientX - rect.left) * scaleX;
-      mouseRef.current.y = (e.clientY - rect.top) * scaleY;
-    };
-    const handleMouseDown = () => { mouseRef.current.down = true; };
-    const handleMouseUp = () => { mouseRef.current.down = false; };
-
-    // Touch Handlers
-    const handleTouchStart = (e: TouchEvent) => {
-      if (e.target !== canvasRef.current) return;
-      e.preventDefault();
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const scaleX = CANVAS_WIDTH / rect.width;
-      const scaleY = CANVAS_HEIGHT / rect.height;
-
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        const t = e.changedTouches[i];
-        const touchX = (t.clientX - rect.left) * scaleX;
-        const touchY = (t.clientY - rect.top) * scaleY;
-
-        // Left half for Joystick
-        if (touchX < CANVAS_WIDTH / 2 && !touchRefs.current.joystick.active) {
-            touchRefs.current.joystick.id = t.identifier;
-            touchRefs.current.joystick.startX = touchX;
-            touchRefs.current.joystick.startY = touchY;
-            touchRefs.current.joystick.currX = touchX;
-            touchRefs.current.joystick.currY = touchY;
-            touchRefs.current.joystick.active = true;
-            touchRefs.current.joystick.dx = 0;
-            touchRefs.current.joystick.dy = 0;
-        } 
-        // Right half for Aim
-        else if (touchX >= CANVAS_WIDTH / 2) {
-            mouseRef.current.x = touchX;
-            mouseRef.current.y = touchY;
-            mouseRef.current.down = true;
-            touchRefs.current.aim.id = t.identifier;
-            touchRefs.current.aim.active = true;
-        }
-      }
-    };
-
-    const handleTouchMove = (e: TouchEvent) => {
-      if (e.target !== canvasRef.current) return;
-      e.preventDefault();
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const scaleX = CANVAS_WIDTH / rect.width;
-      const scaleY = CANVAS_HEIGHT / rect.height;
-
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        const t = e.changedTouches[i];
-        const touchX = (t.clientX - rect.left) * scaleX;
-        const touchY = (t.clientY - rect.top) * scaleY;
-
-        if (t.identifier === touchRefs.current.joystick.id) {
-          touchRefs.current.joystick.currX = touchX;
-          touchRefs.current.joystick.currY = touchY;
-          let dx = touchX - touchRefs.current.joystick.startX;
-          let dy = touchY - touchRefs.current.joystick.startY;
-          // Normalize if vector is too large (max 50px stick)
-          const dist = Math.hypot(dx, dy);
-          touchRefs.current.joystick.dx = dx;
-          touchRefs.current.joystick.dy = dy;
-        } 
-        else if (t.identifier === touchRefs.current.aim.id) {
-          mouseRef.current.x = touchX;
-          mouseRef.current.y = touchY;
-        }
-      }
-    };
-
-    const handleTouchEnd = (e: TouchEvent) => {
-      e.preventDefault();
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        const t = e.changedTouches[i];
-        if (t.identifier === touchRefs.current.joystick.id) {
-          touchRefs.current.joystick.active = false;
-          touchRefs.current.joystick.dx = 0;
-          touchRefs.current.joystick.dy = 0;
-          touchRefs.current.joystick.id = -1;
-        }
-        else if (t.identifier === touchRefs.current.aim.id) {
-          mouseRef.current.down = false;
-          touchRefs.current.aim.active = false;
-          touchRefs.current.aim.id = -1;
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('mouseup', handleMouseUp);
-    
-    // Add non-passive listeners to canvas for preventDefault
-    const canvas = canvasRef.current;
-    if (canvas) {
-      canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
-      canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
-      canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
-      canvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
-    }
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('mouseup', handleMouseUp);
-      if (canvas) {
-        canvas.removeEventListener('touchstart', handleTouchStart);
-        canvas.removeEventListener('touchmove', handleTouchMove);
-        canvas.removeEventListener('touchend', handleTouchEnd);
-        canvas.removeEventListener('touchcancel', handleTouchEnd);
-      }
-    };
-  }, [gameState, setGameState]);
+  // Input handling is now in useInput hook
 
   // --- Upgrades ---
   useEffect(() => {
@@ -553,33 +413,24 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     const inputMult = player.debuffs.confused > 0 ? -1 : 1;
 
-    if ((keysPressed.current['Space'] || keysPressed.current['KeyZ']) && player.dodgeCooldown <= 0) {
+    // Dodge handling using extracted input helpers
+    if (isDodgePressed() && player.dodgeCooldown <= 0) {
       player.isDodging = true;
-      player.dodgeCooldown = 60; 
-      player.invincibility = 20; 
-      
-      let dx = 0, dy = 0;
-      if (keysPressed.current['ArrowUp'] || keysPressed.current['KeyW']) dy = -1 * inputMult;
-      if (keysPressed.current['ArrowDown'] || keysPressed.current['KeyS']) dy = 1 * inputMult;
-      if (keysPressed.current['ArrowLeft'] || keysPressed.current['KeyA']) dx = -1 * inputMult;
-      if (keysPressed.current['ArrowRight'] || keysPressed.current['KeyD']) dx = 1 * inputMult;
-      
-      // Virtual joystick priority
-      if (touchRefs.current.joystick.active) {
-         dx = touchRefs.current.joystick.dx * inputMult;
-         dy = touchRefs.current.joystick.dy * inputMult;
-      }
+      player.dodgeCooldown = 60;
+      player.invincibility = 20;
+
+      let { dx, dy } = getMovementInput(inputMult);
 
       if (dx === 0 && dy === 0) {
-          dx = Math.cos(Math.atan2(mouseRef.current.y - player.y, mouseRef.current.x - player.x));
-          dy = Math.sin(Math.atan2(mouseRef.current.y - player.y, mouseRef.current.x - player.x));
+        dx = Math.cos(Math.atan2(mouseRef.current.y - player.y, mouseRef.current.x - player.x));
+        dy = Math.sin(Math.atan2(mouseRef.current.y - player.y, mouseRef.current.x - player.x));
       }
-      
+
       const len = Math.hypot(dx, dy);
       if (len > 0) {
-         player.x += (dx/len) * 120; 
-         player.y += (dy/len) * 120;
-         createParticles(player.x, player.y, 8, '#ffffff');
+        player.x += (dx / len) * 120;
+        player.y += (dy / len) * 120;
+        createParticles(player.x, player.y, 8, '#ffffff');
       }
       audioService.playDash();
     }
@@ -588,27 +439,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     if (player.invincibility > 0) player.invincibility--;
     if (player.invincibility <= 0) player.isDodging = false;
 
+    // Movement handling using extracted input helpers
     if (!player.isDodging) {
-      let dx = 0, dy = 0;
-      if (keysPressed.current['ArrowUp'] || keysPressed.current['KeyW']) dy = -1 * inputMult;
-      if (keysPressed.current['ArrowDown'] || keysPressed.current['KeyS']) dy = 1 * inputMult;
-      if (keysPressed.current['ArrowLeft'] || keysPressed.current['KeyA']) { dx = -1 * inputMult; player.direction = -1 * inputMult; }
-      if (keysPressed.current['ArrowRight'] || keysPressed.current['KeyD']) { dx = 1 * inputMult; player.direction = 1 * inputMult; }
-      
-      // Virtual Joystick Override
-      if (touchRefs.current.joystick.active) {
-          dx = touchRefs.current.joystick.dx * inputMult;
-          dy = touchRefs.current.joystick.dy * inputMult;
-          // Set direction based on joystick x
-          if (touchRefs.current.joystick.dx !== 0) {
-              player.direction = touchRefs.current.joystick.dx < 0 ? -1 * inputMult : 1 * inputMult;
-          }
-      }
+      const { dx, dy } = getMovementInput(inputMult);
 
       if (dx !== 0 || dy !== 0) {
         const len = Math.hypot(dx, dy);
         player.x += (dx / len) * player.stats.speed;
         player.y += (dy / len) * player.stats.speed;
+        // Set direction based on movement
+        if (dx !== 0) {
+          player.direction = dx < 0 ? -1 : 1;
+        }
       }
       player.direction = mouseRef.current.x < player.x ? -1 : 1;
     }
@@ -629,6 +471,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     player.weapons.forEach(w => {
       const def = WEAPON_DEFINITIONS[w.type];
       if (w.cooldown > 0) w.cooldown--;
+
+      // YOSHIKO - Orbiting guardian spirit
       if (w.type === WeaponType.YOSHIKO) {
           const orbitRadius = def.range;
           const orbitSpeed = 0.05 + (w.level * 0.01);
@@ -649,13 +493,72 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           return;
       }
 
+      // SHUKI - Memoir pages that get stronger when player is hurt
+      if (w.type === WeaponType.SHUKI) {
+          if (w.cooldown <= 0 && enemiesRef.current.length > 0) {
+              // Calculate damage boost based on missing HP (up to 3x at low HP)
+              const hpRatio = player.hp / player.stats.maxHp;
+              const damageMultiplier = 1 + (1 - hpRatio) * 2;
+
+              // Find nearest enemy
+              let nearest = enemiesRef.current[0];
+              let minDist = Infinity;
+              enemiesRef.current.forEach(e => {
+                  const d = Math.hypot(e.x - player.x, e.y - player.y);
+                  if (d < minDist) { minDist = d; nearest = e; }
+              });
+
+              if (nearest && minDist < def.range) {
+                  const angle = Math.atan2(nearest.y - player.y, nearest.x - player.x);
+                  const pageCount = 1 + Math.floor(w.level / 2);
+
+                  for (let i = 0; i < pageCount; i++) {
+                      const spreadAngle = angle + (Math.random() - 0.5) * 0.5;
+                      const baseDmg = (def.baseDamage + player.stats.rangedDamage) * damageMultiplier;
+                      projectilesRef.current.push({
+                          id: Math.random(), x: player.x, y: player.y, width: 10, height: 10,
+                          color: def.color, vx: Math.cos(spreadAngle) * 7, vy: Math.sin(spreadAngle) * 7,
+                          life: 50, maxLife: 50, damage: baseDmg, penetration: 2,
+                          type: w.type, markedForDeletion: false, crit: hpRatio < 0.3
+                      });
+                  }
+                  audioService.playShoot();
+                  const speedMult = 1 + (player.stats.attackSpeed / 100);
+                  w.cooldown = Math.max(20, w.maxCooldown / speedMult);
+              }
+          }
+          return;
+      }
+
+      // KAMEN - Mask that absorbs and reflects enemy projectiles
+      if (w.type === WeaponType.KAMEN) {
+          const absorbRange = def.range + (w.level * 10);
+          projectilesRef.current.forEach(p => {
+              if (p.isEnemy && !p.markedForDeletion) {
+                  const dist = Math.hypot(p.x - player.x, p.y - player.y);
+                  if (dist < absorbRange) {
+                      // Absorb enemy projectile and reflect it
+                      p.isEnemy = false;
+                      p.damage = p.damage * (1 + w.level * 0.5);
+                      p.color = def.color;
+                      p.vx = -p.vx * 1.5;
+                      p.vy = -p.vy * 1.5;
+                      p.life = 60;
+                      createParticles(p.x, p.y, 3, def.color);
+                      audioService.playHit();
+                  }
+              }
+          });
+          return;
+      }
+
       if (def.isManual) {
           if (mouseRef.current.down && w.cooldown <= 0) {
               fireWeapon(w);
               const speedMult = 1 + (player.stats.attackSpeed / 100);
               w.cooldown = Math.max(5, w.maxCooldown / speedMult);
           }
-      } 
+      }
       else if (!def.isManual) {
           if (w.cooldown <= 0) {
              if (w.type === WeaponType.BOOK || enemiesRef.current.length > 0) {
@@ -676,53 +579,150 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       e.knockback.x *= 0.8;
       e.knockback.y *= 0.8;
 
+      const currentWave = waveRef.current;
+      const dx = player.x - e.x;
+      const dy = player.y - e.y;
+      const dist = Math.hypot(dx, dy);
+
       if (e.type === 'BOSS') {
           if (e.y < 100) e.y += 1;
           else {
-              e.x += Math.sin(frameCountRef.current * 0.02) * 2;
-              if (frameCountRef.current % 60 === 0) {
-                  const bullets = 12;
-                  for(let i=0; i<bullets; i++) {
-                    const angle = (Math.PI*2 / bullets) * i + frameCountRef.current;
-                    projectilesRef.current.push({
-                      id: Math.random(), x: e.x + e.width/2, y: e.y + e.height/2, width: 8, height: 8, color: '#ff0000',
-                      vx: Math.cos(angle) * 4, vy: Math.sin(angle) * 4, life: 200, maxLife: 200, damage: 10,
-                      penetration: 1, type: WeaponType.PEN, isMelee: false, markedForDeletion: false, isEnemy: true
-                    });
+              // Boss movement pattern varies by wave
+              const bossPhase = Math.floor(e.hp / e.maxHp * 3);
+              e.x += Math.sin(frameCountRef.current * 0.02) * (2 + (3 - bossPhase));
+
+              // Attack pattern based on HP phase
+              const attackInterval = Math.max(30, 60 - (currentWave * 2));
+              if (frameCountRef.current % attackInterval === 0) {
+                  if (bossPhase === 2) {
+                      // Phase 1: Radial burst
+                      const bullets = 12 + currentWave;
+                      for(let i=0; i<bullets; i++) {
+                        const angle = (Math.PI*2 / bullets) * i + frameCountRef.current * 0.1;
+                        projectilesRef.current.push({
+                          id: Math.random(), x: e.x + e.width/2, y: e.y + e.height/2, width: 8, height: 8, color: '#ff0000',
+                          vx: Math.cos(angle) * 4, vy: Math.sin(angle) * 4, life: 200, maxLife: 200, damage: 10,
+                          penetration: 1, type: WeaponType.PEN, isMelee: false, markedForDeletion: false, isEnemy: true
+                        });
+                      }
+                  } else if (bossPhase === 1) {
+                      // Phase 2: Spiral pattern
+                      for(let i=0; i<3; i++) {
+                        const angle = (frameCountRef.current * 0.15) + (i * Math.PI * 2 / 3);
+                        projectilesRef.current.push({
+                          id: Math.random(), x: e.x + e.width/2, y: e.y + e.height/2, width: 10, height: 10, color: '#ff4444',
+                          vx: Math.cos(angle) * 5, vy: Math.sin(angle) * 5, life: 250, maxLife: 250, damage: 15,
+                          penetration: 1, type: WeaponType.PEN, isMelee: false, markedForDeletion: false, isEnemy: true
+                        });
+                      }
+                  } else {
+                      // Phase 3 (Rage): Aimed bursts + radial
+                      const angleToPlayer = Math.atan2(dy, dx);
+                      for(let i=-2; i<=2; i++) {
+                        projectilesRef.current.push({
+                          id: Math.random(), x: e.x + e.width/2, y: e.y + e.height/2, width: 12, height: 12, color: '#ff0000',
+                          vx: Math.cos(angleToPlayer + i*0.2) * 6, vy: Math.sin(angleToPlayer + i*0.2) * 6, life: 180, maxLife: 180, damage: 20,
+                          penetration: 1, type: WeaponType.PEN, isMelee: false, markedForDeletion: false, isEnemy: true
+                        });
+                      }
                   }
               }
           }
-      } 
+      }
+      // TEMPTER - Retreat and shoot confusion projectiles
       else if (e.type === '堕落 (Tempter)') {
-          const dx = player.x - e.x;
-          const dy = player.y - e.y;
-          const dist = Math.hypot(dx, dy);
-          if (dist < 200) { e.x -= (dx / dist) * e.speed * speedMod; e.y -= (dy / dist) * e.speed * speedMod; } 
-          else { e.x += Math.sin(frameCountRef.current * 0.05) * e.speed; }
+          if (dist < 200) { e.x -= (dx / dist) * e.speed * speedMod; e.y -= (dy / dist) * e.speed * speedMod; }
+          else { e.x += Math.sin(frameCountRef.current * 0.05 + e.id) * e.speed; }
+
           if (!e.attackCooldown) e.attackCooldown = 0;
           if (e.attackCooldown > 0) e.attackCooldown--;
+
+          // Enhanced attack pattern at higher waves
           if (e.attackCooldown <= 0 && dist < 300) {
              const angle = Math.atan2(dy, dx);
-             projectilesRef.current.push({
-                 id: Math.random(), x: e.x, y: e.y, width: 8, height: 8, color: COLORS.debuffConfused,
-                 vx: Math.cos(angle) * 3, vy: Math.sin(angle) * 3, life: 100, maxLife: 100, damage: 5, penetration: 1, type: WeaponType.BOTTLE,
-                 isEnemy: true, playerDebuff: 'confused', markedForDeletion: false
-             });
-             e.attackCooldown = 180;
+             const shotCount = currentWave >= 5 ? 3 : 1;
+             for (let i = 0; i < shotCount; i++) {
+               const spreadAngle = angle + (i - Math.floor(shotCount/2)) * 0.3;
+               projectilesRef.current.push({
+                   id: Math.random(), x: e.x, y: e.y, width: 8, height: 8, color: COLORS.debuffConfused,
+                   vx: Math.cos(spreadAngle) * 3, vy: Math.sin(spreadAngle) * 3, life: 100, maxLife: 100, damage: 5, penetration: 1, type: WeaponType.BOTTLE,
+                   isEnemy: true, playerDebuff: 'confused', markedForDeletion: false
+               });
+             }
+             e.attackCooldown = Math.max(90, 180 - currentWave * 10);
           }
       }
+      // MORPHINE - Rage mode when low HP, faster at higher waves
       else if (e.type === '薬鬼 (Morphine)') {
-          if (!e.rageMode && e.hp < e.maxHp * 0.5) { e.rageMode = true; e.speed *= 2.5; createDamageText(e.x, e.y - 20, 0, false, '#ff0000'); }
-          const dx = player.x - e.x;
-          const dy = player.y - e.y;
-          const dist = Math.hypot(dx, dy);
+          const rageThreshold = currentWave >= 8 ? 0.7 : 0.5;
+          if (!e.rageMode && e.hp < e.maxHp * rageThreshold) {
+              e.rageMode = true;
+              e.speed *= 2.5;
+              createDamageText(e.x, e.y - 20, 0, false, '#ff0000');
+          }
+          // Erratic movement when enraged
+          if (e.rageMode) {
+              e.x += (dx / dist) * e.speed * speedMod + Math.sin(frameCountRef.current * 0.2 + e.id) * 2;
+              e.y += (dy / dist) * e.speed * speedMod + Math.cos(frameCountRef.current * 0.2 + e.id) * 2;
+          } else {
+              e.x += (dx / dist) * e.speed * speedMod;
+              e.y += (dy / dist) * e.speed * speedMod;
+          }
+      }
+      // GHOST - Phase through and ambush
+      else if (e.type === '亡霊 (Ghost)') {
+          // Ghosts teleport periodically at higher waves
+          if (currentWave >= 6 && frameCountRef.current % 180 === Math.floor(e.id * 100) % 180) {
+              const teleportDist = 100;
+              const teleportAngle = Math.atan2(dy, dx);
+              e.x += Math.cos(teleportAngle) * teleportDist;
+              e.y += Math.sin(teleportAngle) * teleportDist;
+              createParticles(e.x, e.y, 5, '#ffffff');
+          }
           e.x += (dx / dist) * e.speed * speedMod;
           e.y += (dy / dist) * e.speed * speedMod;
       }
+      // HANNYA - Dash attack pattern
+      else if (e.type === '般若 (Hannya)') {
+          if (!e.attackCooldown) e.attackCooldown = 60;
+          if (e.attackCooldown > 0) e.attackCooldown--;
+
+          // Dash towards player periodically
+          if (e.attackCooldown <= 0 && dist < 200) {
+              e.x += (dx / dist) * 80;
+              e.y += (dy / dist) * 80;
+              createParticles(e.x, e.y, 4, '#be185d');
+              e.attackCooldown = 120;
+          } else {
+              e.x += (dx / dist) * e.speed * speedMod * 0.5;
+              e.y += (dy / dist) * e.speed * speedMod * 0.5;
+          }
+      }
+      // FATHER - Slow but devastating, creates guilt zone
+      else if (e.type === '厳父 (Father)') {
+          e.x += (dx / dist) * e.speed * speedMod;
+          e.y += (dy / dist) * e.speed * speedMod;
+
+          // Create guilt aura at higher waves
+          if (currentWave >= 10 && dist < 100) {
+              if (player.debuffs.guilt < 60) {
+                  player.debuffs.guilt = 60;
+                  createDamageText(player.x, player.y - 40, 0, false, COLORS.debuffGuilt);
+              }
+          }
+      }
+      // KEMPEI - Formation movement at higher waves
+      else if (e.type === '憲兵 (Kempei)') {
+          // March in formation
+          const formationOffset = Math.sin(frameCountRef.current * 0.03 + e.id) * 30;
+          const perpX = -dy / (dist || 1);
+          const perpY = dx / (dist || 1);
+
+          e.x += ((dx / dist) * e.speed * speedMod) + perpX * formationOffset * 0.02;
+          e.y += ((dy / dist) * e.speed * speedMod) + perpY * formationOffset * 0.02;
+      }
+      // Default enemy behavior
       else {
-        const dx = player.x - e.x;
-        const dy = player.y - e.y;
-        const dist = Math.hypot(dx, dy);
         if (dist > 0) {
             let pushX = 0, pushY = 0;
             enemiesRef.current.forEach(other => {
@@ -735,29 +735,30 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             e.x += ((dx / dist) * e.speed * speedMod) + pushX * 0.2;
             e.y += ((dy / dist) * e.speed * speedMod) + pushY * 0.2;
         }
+      }
 
-        if (dist < (player.width/2 + e.width/2)) {
-            if (player.invincibility <= 0) {
-                let dmg = Math.max(1, e.damage - player.stats.armor);
-                if (e.type === '厳父 (Father)') {
-                    player.debuffs.guilt = 180;
-                    createDamageText(player.x, player.y - 30, 0, false, COLORS.debuffGuilt);
-                    const kAng = Math.atan2(dy, dx);
-                    player.x += Math.cos(kAng) * 100;
-                    player.y += Math.sin(kAng) * 100;
-                }
-                else if (e.type === '薬鬼 (Morphine)') {
-                    player.debuffs.poison = 300;
-                    createDamageText(player.x, player.y - 30, 0, false, COLORS.debuffPoison);
-                }
-                player.hp -= dmg;
-                player.invincibility = 30; 
-                audioService.playHit();
-                createDamageText(player.x, player.y, dmg);
-                player.x += (dx/dist) * 20;
-                player.y += (dy/dist) * 20;
-            }
-        }
+      // Collision check for all enemies
+      if (dist < (player.width/2 + e.width/2)) {
+          if (player.invincibility <= 0) {
+              let dmg = Math.max(1, e.damage - player.stats.armor);
+              if (e.type === '厳父 (Father)') {
+                  player.debuffs.guilt = 180;
+                  createDamageText(player.x, player.y - 30, 0, false, COLORS.debuffGuilt);
+                  const kAng = Math.atan2(dy, dx);
+                  player.x += Math.cos(kAng) * 100;
+                  player.y += Math.sin(kAng) * 100;
+              }
+              else if (e.type === '薬鬼 (Morphine)') {
+                  player.debuffs.poison = 300;
+                  createDamageText(player.x, player.y - 30, 0, false, COLORS.debuffPoison);
+              }
+              player.hp -= dmg;
+              player.invincibility = 30;
+              audioService.playHit();
+              createDamageText(player.x, player.y, dmg);
+              player.x += (dx/dist) * 20;
+              player.y += (dy/dist) * 20;
+          }
       }
     });
 
@@ -963,6 +964,25 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             ctx.beginPath();
             ctx.arc(ox, oy, 5, 0, Math.PI*2);
             ctx.fill();
+        }
+        // Draw Kamen (Mask) aura
+        if (w.type === WeaponType.KAMEN) {
+            const def = WEAPON_DEFINITIONS[w.type];
+            const pulseSize = Math.sin(frameCountRef.current * 0.1) * 5;
+            ctx.save();
+            ctx.strokeStyle = def.color;
+            ctx.lineWidth = 2;
+            ctx.globalAlpha = 0.4 + Math.sin(frameCountRef.current * 0.05) * 0.2;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, def.range + pulseSize, 0, Math.PI * 2);
+            ctx.stroke();
+            // Draw mask icon
+            ctx.globalAlpha = 0.7;
+            ctx.fillStyle = def.color;
+            ctx.font = '16px serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('仮', p.x, p.y - p.height - 5);
+            ctx.restore();
         }
     });
 

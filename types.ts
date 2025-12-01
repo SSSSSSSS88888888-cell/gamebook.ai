@@ -17,7 +17,9 @@ export enum WeaponType {
   PISTOL = 'PISTOL', // Ranged: Mouse Aim Shot
   BOTTLE = 'BOTTLE', // Ranged: Auto AOE Slow
   BOOK = 'BOOK',     // Passive: Defense Down Aura
-  YOSHIKO = 'YOSHIKO' // Passive: Orbiting Shield
+  YOSHIKO = 'YOSHIKO', // Passive: Orbiting Shield
+  SHUKI = 'SHUKI',   // 手記: Auto-targeting memoir pages, stronger when hurt
+  KAMEN = 'KAMEN'    // 仮面: Defensive mask that absorbs and reflects
 }
 
 export interface PlayerStats {

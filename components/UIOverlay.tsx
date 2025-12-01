@@ -119,13 +119,13 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
         {/* Main Title */}
         <div className="relative z-10 text-center mb-8">
-          <h1 className="font-pixel text-3xl md:text-5xl mb-2 chromatic-aberration rainbow-text tracking-wider">
+          <h1 className="font-pixel text-3xl md:text-5xl mb-2 chromatic-aberration neon-cyan-glow tracking-wider">
             GameBook
           </h1>
-          <div className="font-pixel text-xl md:text-2xl neon-cyan-glow">
-            <span className="text-[#ff2d95]">.</span>
-            <span className="text-[#00f5ff]">a</span>
-            <span className="text-[#ffea00]">i</span>
+          <div className="font-pixel text-xl md:text-2xl">
+            <span className="text-[#ff2d95] neon-pink-glow">.</span>
+            <span className="text-[#00f5ff] neon-cyan-glow">a</span>
+            <span className="text-[#ffea00] neon-yellow-glow">i</span>
           </div>
         </div>
 
@@ -438,7 +438,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
         {gameState === GameState.VICTORY && (
             <div className="absolute inset-0 bg-gradient-to-b from-[#0a0a2e]/95 to-black/95 flex flex-col items-center justify-center z-50 text-white animate-in zoom-in duration-500">
-                <h2 className="font-pixel text-3xl md:text-4xl text-[#ffea00] mb-4 rainbow-text">VICTORY!</h2>
+                <h2 className="font-pixel text-3xl md:text-4xl text-[#ffea00] mb-4 neon-yellow-glow">VICTORY!</h2>
                 <h3 className="font-pixel text-xl text-[#39ff14] mb-8 neon-text" style={{ color: '#39ff14' }}>★ QUEST COMPLETE ★</h3>
                  <p className="font-pixel text-xs text-[#00f5ff] mb-12">
                      {selectedBookId === 'lemon' ? 'THE OMINOUS MASS WAS DESTROYED' : 'FREEDOM HAS BEEN WON'}

@@ -11,7 +11,7 @@
     <style>
       body {
         margin: 0;
-        background-color: #050505;
+        background-color: #0a0a1a;
         overflow: hidden;
         font-family: 'Zen Old Mincho', serif;
         touch-action: none;
@@ -22,50 +22,183 @@
       .font-pixel {
         font-family: 'Press Start 2P', cursive;
       }
-      
-      /* Emotional Film Effects */
-      .film-grain {
+
+      /* 80s Retro Color Palette */
+      :root {
+        --neon-pink: #ff2d95;
+        --neon-cyan: #00f5ff;
+        --neon-yellow: #ffea00;
+        --neon-green: #39ff14;
+        --neon-orange: #ff6b35;
+        --neon-purple: #bf00ff;
+        --retro-blue: #1a1a2e;
+        --retro-dark: #0f0f23;
+      }
+
+      /* Pixel Art Style Borders */
+      .pixel-border {
+        border: 4px solid;
+        border-image: linear-gradient(45deg, var(--neon-cyan), var(--neon-pink), var(--neon-yellow)) 1;
+        box-shadow:
+          0 0 10px var(--neon-cyan),
+          inset 0 0 10px rgba(0, 245, 255, 0.1);
+      }
+
+      /* Neon Glow Text */
+      .neon-text {
+        text-shadow:
+          0 0 5px currentColor,
+          0 0 10px currentColor,
+          0 0 20px currentColor,
+          0 0 40px currentColor;
+      }
+
+      .neon-pink-glow {
+        color: var(--neon-pink);
+        text-shadow:
+          0 0 5px var(--neon-pink),
+          0 0 10px var(--neon-pink),
+          0 0 20px var(--neon-pink);
+      }
+
+      .neon-cyan-glow {
+        color: var(--neon-cyan);
+        text-shadow:
+          0 0 5px var(--neon-cyan),
+          0 0 10px var(--neon-cyan),
+          0 0 20px var(--neon-cyan);
+      }
+
+      .neon-yellow-glow {
+        color: var(--neon-yellow);
+        text-shadow:
+          0 0 5px var(--neon-yellow),
+          0 0 10px var(--neon-yellow),
+          0 0 20px var(--neon-yellow);
+      }
+
+      /* Blinking Animation */
+      @keyframes blink {
+        0%, 50% { opacity: 1; }
+        51%, 100% { opacity: 0; }
+      }
+      .blink {
+        animation: blink 1s step-end infinite;
+      }
+
+      /* Rainbow Animation */
+      @keyframes rainbow {
+        0% { color: var(--neon-pink); text-shadow: 0 0 10px var(--neon-pink); }
+        16% { color: var(--neon-orange); text-shadow: 0 0 10px var(--neon-orange); }
+        33% { color: var(--neon-yellow); text-shadow: 0 0 10px var(--neon-yellow); }
+        50% { color: var(--neon-green); text-shadow: 0 0 10px var(--neon-green); }
+        66% { color: var(--neon-cyan); text-shadow: 0 0 10px var(--neon-cyan); }
+        83% { color: var(--neon-purple); text-shadow: 0 0 10px var(--neon-purple); }
+        100% { color: var(--neon-pink); text-shadow: 0 0 10px var(--neon-pink); }
+      }
+      .rainbow-text {
+        animation: rainbow 3s linear infinite;
+      }
+
+      /* Pulse Animation */
+      @keyframes pulse-glow {
+        0%, 100% {
+          box-shadow: 0 0 5px var(--neon-cyan), 0 0 10px var(--neon-cyan);
+        }
+        50% {
+          box-shadow: 0 0 20px var(--neon-cyan), 0 0 40px var(--neon-cyan);
+        }
+      }
+      .pulse-border {
+        animation: pulse-glow 2s ease-in-out infinite;
+      }
+
+      /* Floating Animation */
+      @keyframes float {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-10px); }
+      }
+      .float {
+        animation: float 3s ease-in-out infinite;
+      }
+
+      /* Star/Sparkle Animation */
+      @keyframes sparkle {
+        0%, 100% { opacity: 0; transform: scale(0); }
+        50% { opacity: 1; transform: scale(1); }
+      }
+
+      /* Retro Grid Background */
+      .retro-grid {
+        background:
+          linear-gradient(var(--neon-pink) 1px, transparent 1px),
+          linear-gradient(90deg, var(--neon-pink) 1px, transparent 1px);
+        background-size: 40px 40px;
+        background-position: center center;
+        opacity: 0.15;
+      }
+
+      /* 8-bit Button Style */
+      .pixel-btn {
+        position: relative;
+        font-family: 'Press Start 2P', cursive;
+        padding: 12px 24px;
+        background: linear-gradient(180deg, #333 0%, #222 100%);
+        border: none;
+        color: white;
+        cursor: pointer;
+        transition: all 0.1s;
+        box-shadow:
+          4px 4px 0 #000,
+          inset -2px -2px 0 #111,
+          inset 2px 2px 0 #444;
+      }
+      .pixel-btn:hover {
+        transform: translate(2px, 2px);
+        box-shadow:
+          2px 2px 0 #000,
+          inset -2px -2px 0 #111,
+          inset 2px 2px 0 #444;
+      }
+      .pixel-btn:active {
+        transform: translate(4px, 4px);
+        box-shadow:
+          0 0 0 #000,
+          inset -2px -2px 0 #111,
+          inset 2px 2px 0 #333;
+      }
+
+      /* CRT Monitor Effect */
+      .crt-effect {
+        position: relative;
+      }
+      .crt-effect::before {
+        content: "";
         position: absolute;
         top: 0; left: 0; right: 0; bottom: 0;
-        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.15'/%3E%3C/svg%3E");
+        background: linear-gradient(
+          rgba(18, 16, 16, 0) 50%,
+          rgba(0, 0, 0, 0.25) 50%
+        );
+        background-size: 100% 4px;
         pointer-events: none;
-        z-index: 40;
-        opacity: 0.4;
-        mix-blend-mode: overlay;
-        animation: grain 8s steps(10) infinite;
+        z-index: 100;
       }
-
-      .vignette {
+      .crt-effect::after {
+        content: "";
         position: absolute;
         top: 0; left: 0; right: 0; bottom: 0;
-        background: radial-gradient(circle, rgba(0,0,0,0) 50%, rgba(0,0,0,0.6) 90%, rgba(0,0,0,0.9) 100%);
+        background: radial-gradient(circle at center, transparent 60%, rgba(0,0,0,0.4) 100%);
         pointer-events: none;
-        z-index: 45;
+        z-index: 101;
       }
 
-      .chromatic-aberration {
-        text-shadow: 2px 0 rgba(255,0,0,0.3), -2px 0 rgba(0,255,255,0.3);
-      }
-
-      @keyframes grain {
-        0%, 100% { transform: translate(0, 0); }
-        10% { transform: translate(-5%, -5%); }
-        20% { transform: translate(-10%, 5%); }
-        30% { transform: translate(5%, -10%); }
-        40% { transform: translate(-5%, 15%); }
-        50% { transform: translate(-10%, 5%); }
-        60% { transform: translate(15%, 0); }
-        70% { transform: translate(0, 10%); }
-        80% { transform: translate(-15%, 0); }
-        90% { transform: translate(10%, 5%); }
-      }
-
-      /* CRT Scanlines (Subtler) */
+      /* Scanlines (Subtler for retro feel) */
       .scanlines {
         background: linear-gradient(
           to bottom,
           rgba(18, 16, 16, 0) 50%,
-          rgba(0, 0, 0, 0.15) 50%
+          rgba(0, 0, 0, 0.1) 50%
         );
         background-size: 100% 4px;
         position: absolute;
@@ -73,10 +206,38 @@
         pointer-events: none;
         z-index: 50;
       }
-      
+
       .writing-vertical-rl {
         writing-mode: vertical-rl;
         text-orientation: upright;
+      }
+
+      /* Chromatic Aberration for titles */
+      .chromatic-aberration {
+        text-shadow:
+          2px 0 rgba(255, 45, 149, 0.5),
+          -2px 0 rgba(0, 245, 255, 0.5);
+      }
+
+      /* Pixel Art Stars */
+      .pixel-star {
+        width: 4px;
+        height: 4px;
+        background: white;
+        position: absolute;
+        animation: sparkle 2s ease-in-out infinite;
+      }
+
+      /* Book Card Hover Effect */
+      .book-card {
+        transition: all 0.2s ease;
+        image-rendering: pixelated;
+      }
+      .book-card:hover {
+        transform: scale(1.05) translateY(-5px);
+        box-shadow:
+          0 0 20px var(--neon-cyan),
+          0 0 40px var(--neon-pink);
       }
     </style>
   </head>

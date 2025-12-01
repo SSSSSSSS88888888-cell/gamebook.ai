@@ -94,73 +94,201 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
     </div>
   );
 
-  // --- MENU Screen (Tosho Yugijo) ---
+  // --- MENU Screen (80s Retro Style) ---
   if (gameState === GameState.MENU) {
     return (
-      <div className="absolute inset-0 bg-black flex items-center justify-center z-50 text-white overflow-hidden">
-        <div className="absolute inset-0 opacity-20 pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/aged-paper.png')]"></div>
-        <div className="flex flex-row-reverse items-start gap-8 md:gap-16">
-            <div className="writing-vertical-rl text-5xl md:text-7xl font-serif text-gray-200 tracking-widest border-l-4 border-red-900 pl-8 py-4">
-              図書遊戯場
-            </div>
-            <div className="flex flex-col justify-end h-96 pb-8 gap-12">
-                 <p className="writing-vertical-rl text-gray-600 font-serif text-sm tracking-widest ml-4">
-                    文学に潜り、其の世界を体験せよ。
-                 </p>
-                 <div className="flex gap-8">
-                    <button 
-                        onClick={() => { audioService.toggle(true); onStartGameSelect(); }}
-                        className="writing-vertical-rl text-xl text-red-900 font-serif hover:text-red-500 transition-colors tracking-[0.5em] border-r border-gray-800 pr-4 h-32"
-                    >
-                        遊戯
-                    </button>
-                    <button 
-                        onClick={() => { onReadNovel(); }}
-                        className="writing-vertical-rl text-xl text-gray-500 font-serif hover:text-gray-300 transition-colors tracking-[0.5em] border-r border-gray-800 pr-4 h-32"
-                    >
-                        読書
-                    </button>
-                 </div>
-            </div>
+      <div className="absolute inset-0 bg-gradient-to-b from-[#0a0a2e] via-[#1a0a3e] to-[#0a0a1a] flex flex-col items-center justify-center z-50 text-white overflow-hidden crt-effect">
+        {/* Animated Grid Background */}
+        <div className="absolute inset-0 retro-grid"></div>
+
+        {/* Floating Stars */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+          {[...Array(20)].map((_, i) => (
+            <div
+              key={i}
+              className="pixel-star"
+              style={{
+                left: `${Math.random() * 100}%`,
+                top: `${Math.random() * 100}%`,
+                animationDelay: `${Math.random() * 2}s`,
+                animationDuration: `${1.5 + Math.random() * 2}s`
+              }}
+            />
+          ))}
         </div>
+
+        {/* Main Title */}
+        <div className="relative z-10 text-center mb-8">
+          <h1 className="font-pixel text-2xl md:text-4xl mb-4 chromatic-aberration rainbow-text tracking-wider">
+            TOSHO YUGIJO
+          </h1>
+          <h2 className="font-pixel text-lg md:text-2xl neon-cyan-glow float">
+            図書遊戯場
+          </h2>
+        </div>
+
+        {/* Subtitle */}
+        <p className="font-pixel text-xs md:text-sm text-[#ff2d95] mb-12 text-center px-4 neon-pink-glow">
+          DIVE INTO LITERATURE
+        </p>
+
+        {/* Menu Buttons */}
+        <div className="flex flex-col gap-6 z-10">
+          <button
+            onClick={() => { audioService.toggle(true); onStartGameSelect(); }}
+            className="pixel-btn neon-cyan-glow text-sm md:text-base px-8 py-4 hover:scale-105 transition-transform"
+            style={{
+              background: 'linear-gradient(180deg, #00f5ff33 0%, #00f5ff11 100%)',
+              border: '3px solid #00f5ff'
+            }}
+          >
+            <span className="blink mr-2">▶</span> GAME START
+          </button>
+
+          <button
+            onClick={() => { onReadNovel(); }}
+            className="pixel-btn neon-yellow-glow text-sm md:text-base px-8 py-4 hover:scale-105 transition-transform"
+            style={{
+              background: 'linear-gradient(180deg, #ffea0033 0%, #ffea0011 100%)',
+              border: '3px solid #ffea00'
+            }}
+          >
+            <span className="mr-2">📖</span> READ NOVEL
+          </button>
+        </div>
+
+        {/* Decorative Elements */}
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 text-center z-10">
+          <p className="font-pixel text-[10px] text-gray-500 mb-2">
+            PRESS START TO BEGIN
+          </p>
+          <p className="font-pixel text-[8px] text-gray-600">
+            © 2024 RETRO LITERATURE QUEST
+          </p>
+        </div>
+
+        {/* Corner Decorations */}
+        <div className="absolute top-4 left-4 w-8 h-8 border-t-4 border-l-4 border-[#ff2d95]"></div>
+        <div className="absolute top-4 right-4 w-8 h-8 border-t-4 border-r-4 border-[#00f5ff]"></div>
+        <div className="absolute bottom-4 left-4 w-8 h-8 border-b-4 border-l-4 border-[#00f5ff]"></div>
+        <div className="absolute bottom-4 right-4 w-8 h-8 border-b-4 border-r-4 border-[#ff2d95]"></div>
       </div>
     );
   }
 
-  // --- GAME SELECT Screen ---
+  // --- GAME SELECT Screen (80s Retro Style) ---
   if (gameState === GameState.GAME_SELECT) {
+    const bookColors: Record<string, string> = {
+      'ningen': '#ff2d95',
+      'lemon': '#ffea00',
+      'social_contract': '#00f5ff'
+    };
+
     return (
-        <div className="absolute inset-0 bg-[#1c1917] flex flex-col items-center justify-center z-50 text-white font-serif overflow-hidden">
-             <h2 className="text-2xl mb-12 tracking-[1em] text-gray-400 border-b border-gray-700 pb-4">遊戯選択</h2>
-             
-             <div className="flex gap-6 md:gap-12 flex-wrap justify-center px-8 z-10">
-                {LIBRARY.map((book) => (
-                    <button 
-                        key={book.id}
-                        onClick={() => { audioService.playExp(); onStartGame(book.id); }}
-                        className="group relative w-32 md:w-40 h-56 bg-neutral-900 shadow-2xl hover:scale-105 transition-all duration-300 flex flex-col items-center justify-center p-4 border border-gray-800"
-                    >
-                        {/* Book Spine / Cover visualization */}
-                        <div className="absolute inset-0 opacity-50 transition-opacity group-hover:opacity-80" style={{ backgroundColor: book.color }}></div>
-                        <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>
-                        
-                        <div className="writing-vertical-rl text-white font-serif text-lg md:text-xl tracking-widest font-bold z-10 drop-shadow-lg">
+        <div className="absolute inset-0 bg-gradient-to-b from-[#0a0a2e] via-[#1a0a3e] to-[#0a0a1a] flex flex-col items-center justify-center z-50 text-white overflow-hidden crt-effect">
+             {/* Animated Grid Background */}
+             <div className="absolute inset-0 retro-grid"></div>
+
+             {/* Floating Stars */}
+             <div className="absolute inset-0 pointer-events-none overflow-hidden">
+               {[...Array(15)].map((_, i) => (
+                 <div
+                   key={i}
+                   className="pixel-star"
+                   style={{
+                     left: `${Math.random() * 100}%`,
+                     top: `${Math.random() * 100}%`,
+                     animationDelay: `${Math.random() * 2}s`,
+                     animationDuration: `${1.5 + Math.random() * 2}s`
+                   }}
+                 />
+               ))}
+             </div>
+
+             {/* Title */}
+             <h2 className="font-pixel text-lg md:text-2xl mb-8 neon-cyan-glow tracking-wider z-10">
+               SELECT YOUR QUEST
+             </h2>
+             <p className="font-pixel text-xs text-[#ff2d95] mb-8 neon-pink-glow z-10">
+               遊戯選択
+             </p>
+
+             {/* Book Selection Grid */}
+             <div className="flex gap-4 md:gap-8 flex-wrap justify-center px-4 z-10">
+                {LIBRARY.map((book, index) => {
+                    const neonColor = bookColors[book.id] || '#00f5ff';
+                    return (
+                      <button
+                          key={book.id}
+                          onClick={() => { audioService.playExp(); onStartGame(book.id); }}
+                          className="book-card group relative w-28 md:w-36 h-44 md:h-56 flex flex-col items-center justify-center p-3 transition-all duration-300"
+                          style={{
+                            background: `linear-gradient(180deg, ${neonColor}22 0%, ${neonColor}08 100%)`,
+                            border: `3px solid ${neonColor}`,
+                            boxShadow: `0 0 15px ${neonColor}55, inset 0 0 20px ${neonColor}11`
+                          }}
+                      >
+                          {/* Pixel Art Book Icon */}
+                          <div
+                            className="w-12 h-16 md:w-16 md:h-20 mb-3 relative"
+                            style={{
+                              background: `linear-gradient(135deg, ${neonColor} 0%, ${neonColor}88 100%)`,
+                              boxShadow: `4px 4px 0 rgba(0,0,0,0.5)`,
+                              imageRendering: 'pixelated'
+                            }}
+                          >
+                            {/* Book spine detail */}
+                            <div
+                              className="absolute left-0 top-0 w-2 h-full"
+                              style={{ background: `${neonColor}44` }}
+                            />
+                            {/* Book lines */}
+                            <div className="absolute inset-2 flex flex-col justify-center gap-1">
+                              <div className="h-1 bg-black/30"></div>
+                              <div className="h-1 bg-black/30 w-3/4"></div>
+                              <div className="h-1 bg-black/30"></div>
+                            </div>
+                          </div>
+
+                          {/* Book Title */}
+                          <div
+                            className="font-pixel text-[10px] md:text-xs text-center leading-relaxed z-10 neon-text"
+                            style={{ color: neonColor }}
+                          >
                             {book.title}
-                        </div>
-                        
-                        <div className="absolute bottom-4 text-[10px] text-gray-300 z-10 font-sans opacity-0 group-hover:opacity-100 transition-opacity">
-                           潜る
-                        </div>
-                    </button>
-                ))}
+                          </div>
+
+                          {/* Hover Instruction */}
+                          <div
+                            className="absolute bottom-2 font-pixel text-[8px] opacity-0 group-hover:opacity-100 transition-opacity blink"
+                            style={{ color: neonColor }}
+                          >
+                            ▶ ENTER
+                          </div>
+
+                          {/* Corner Accents */}
+                          <div className="absolute top-1 left-1 w-2 h-2 border-t border-l" style={{ borderColor: neonColor }}></div>
+                          <div className="absolute top-1 right-1 w-2 h-2 border-t border-r" style={{ borderColor: neonColor }}></div>
+                          <div className="absolute bottom-1 left-1 w-2 h-2 border-b border-l" style={{ borderColor: neonColor }}></div>
+                          <div className="absolute bottom-1 right-1 w-2 h-2 border-b border-r" style={{ borderColor: neonColor }}></div>
+                      </button>
+                    );
+                })}
             </div>
 
-            <button 
-                onClick={() => window.location.reload()} // Quick way back to menu state reset
-                className="mt-16 text-gray-500 hover:text-white transition-colors tracking-widest text-sm z-10"
+            {/* Back Button */}
+            <button
+                onClick={() => window.location.reload()}
+                className="mt-10 font-pixel text-xs text-gray-400 hover:text-[#ff2d95] transition-colors z-10 px-6 py-2 border border-gray-600 hover:border-[#ff2d95]"
             >
-                戻る
+              ← BACK
             </button>
+
+            {/* Corner Decorations */}
+            <div className="absolute top-4 left-4 w-8 h-8 border-t-4 border-l-4 border-[#ff2d95]"></div>
+            <div className="absolute top-4 right-4 w-8 h-8 border-t-4 border-r-4 border-[#00f5ff]"></div>
+            <div className="absolute bottom-4 left-4 w-8 h-8 border-b-4 border-l-4 border-[#00f5ff]"></div>
+            <div className="absolute bottom-4 right-4 w-8 h-8 border-b-4 border-r-4 border-[#ff2d95]"></div>
         </div>
     );
   }

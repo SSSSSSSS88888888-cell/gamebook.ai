@@ -1,7 +1,7 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { GameState, GameStats, Player, WeaponType } from '../types';
-import { CANVAS_WIDTH, CANVAS_HEIGHT, COLORS, SPRITES, SPRITE_PALETTE, SPRITE_SCALE } from '../constants';
+import { GameState, GameStats } from '../types';
+import { CANVAS_WIDTH, CANVAS_HEIGHT, SPRITE_PALETTE, SPRITE_SCALE } from '../constants';
 import { audioService } from '../services/audioService';
 
 interface LemonGameProps {
@@ -10,307 +10,553 @@ interface LemonGameProps {
   setStats: (stats: GameStats) => void;
 }
 
-interface GridEntity {
+// Book block types with different colors and point values
+interface BookBlock {
+  id: number;
   x: number;
   y: number;
-  type: 'PLAYER' | 'ENEMY' | 'BOMB' | 'EXPLOSION' | 'BOX' | 'WALL';
-  life?: number;
-  id?: number;
+  width: number;
+  height: number;
+  color: string;
+  bookType: string;
+  points: number;
+  velocity: { x: number; y: number };
+  rotation: number;
+  settled: boolean;
 }
+
+interface Lemon {
+  x: number;
+  y: number;
+  placed: boolean;
+}
+
+const BOOK_TYPES = [
+  { name: '画集', width: 60, height: 20, color: '#8B4513', points: 10 },
+  { name: '詩集', width: 45, height: 15, color: '#2F4F4F', points: 15 },
+  { name: '洋書', width: 50, height: 25, color: '#800020', points: 12 },
+  { name: '文庫', width: 35, height: 12, color: '#1a365d', points: 8 },
+  { name: '辞書', width: 55, height: 30, color: '#374151', points: 20 },
+  { name: '雑誌', width: 40, height: 10, color: '#065f46', points: 5 },
+];
+
+const GRAVITY = 0.3;
+const FRICTION = 0.95;
+const GROUND_Y = CANVAS_HEIGHT - 80;
+const SHELF_HEIGHT = 60;
 
 export const LemonGame: React.FC<LemonGameProps> = ({ gameState, setGameState, setStats }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number>(0);
-  const spriteCacheRef = useRef<{[key: string]: HTMLCanvasElement}>({});
 
-  const CELL_SIZE = 40;
-  const GRID_W = Math.floor(CANVAS_WIDTH / CELL_SIZE);
-  const GRID_H = Math.floor(CANVAS_HEIGHT / CELL_SIZE);
-
-  // Game State Refs
-  const playerRef = useRef<{x: number, y: number, alive: boolean}>({ x: 1, y: 1, alive: true });
-  const gridRef = useRef<(string | null)[][]>([]); // 'BOX', 'WALL', null
-  const enemiesRef = useRef<{id: number, x: number, y: number, alive: boolean, dir: number}[]>([]);
-  const bombsRef = useRef<{id: number, x: number, y: number, timer: number}[]>([]);
-  const explosionsRef = useRef<{x: number, y: number, life: number}[]>([]);
-  
-  const keysPressed = useRef<{ [key: string]: boolean }>({});
-  const lastMoveTime = useRef(0);
+  // Game state refs
+  const blocksRef = useRef<BookBlock[]>([]);
+  const currentBlockRef = useRef<BookBlock | null>(null);
+  const lemonRef = useRef<Lemon>({ x: CANVAS_WIDTH / 2, y: 50, placed: false });
   const scoreRef = useRef(0);
+  const heightRef = useRef(0);
+  const balanceRef = useRef(100); // 0-100, higher is better
+  const gamePhaseRef = useRef<'building' | 'placing_lemon' | 'exploding' | 'result'>('building');
+  const explosionTimerRef = useRef(0);
+  const blockIdRef = useRef(0);
 
-  // Initialize
+  const keysPressed = useRef<{ [key: string]: boolean }>({});
+  const mousePos = useRef({ x: CANVAS_WIDTH / 2, y: 100 });
+
+  // Initialize game
   useEffect(() => {
-    // Cache Sprites
-    const createSpriteCanvas = (pixelMap: string[]): HTMLCanvasElement => {
-      const h = pixelMap.length;
-      const w = pixelMap[0].length;
-      const c = document.createElement('canvas');
-      c.width = w * SPRITE_SCALE;
-      c.height = h * SPRITE_SCALE;
-      const ctx = c.getContext('2d');
-      if (ctx) {
-        for(let y=0; y<h; y++) {
-            for(let x=0; x<w; x++) {
-            const char = pixelMap[y][x];
-            if (SPRITE_PALETTE[char] && SPRITE_PALETTE[char] !== 'transparent') {
-                ctx.fillStyle = SPRITE_PALETTE[char];
-                ctx.fillRect(x * SPRITE_SCALE, y * SPRITE_SCALE, SPRITE_SCALE, SPRITE_SCALE);
-            }
-            }
+    resetGame();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      keysPressed.current[e.code] = true;
+
+      if (e.code === 'Space' || e.code === 'KeyZ') {
+        if (gamePhaseRef.current === 'building' && currentBlockRef.current) {
+          dropCurrentBlock();
+        } else if (gamePhaseRef.current === 'placing_lemon' && !lemonRef.current.placed) {
+          placeLemon();
         }
       }
-      return c;
+
+      if (e.code === 'Enter' && gamePhaseRef.current === 'building') {
+        // Finish building, place lemon
+        gamePhaseRef.current = 'placing_lemon';
+        currentBlockRef.current = null;
+      }
     };
-    const cache: {[key: string]: HTMLCanvasElement} = {};
-    ['PLAYER', 'LEMON', 'EXPLOSION', 'BOX', 'WALL', 'CRITIC'].forEach(key => {
-        const spriteKey = key === 'CRITIC' ? 'CRITIC' : key; 
-        if (SPRITES[spriteKey as keyof typeof SPRITES]) {
-             cache[key] = createSpriteCanvas(SPRITES[spriteKey as keyof typeof SPRITES]);
-        }
-    });
-    spriteCacheRef.current = cache;
 
-    // Reset Level
-    resetLevel();
+    const handleKeyUp = (e: KeyboardEvent) => {
+      keysPressed.current[e.code] = false;
+    };
 
-    const handleKeyDown = (e: KeyboardEvent) => { keysPressed.current[e.code] = true; };
-    const handleKeyUp = (e: KeyboardEvent) => { keysPressed.current[e.code] = false; };
+    const handleMouseMove = (e: MouseEvent) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      mousePos.current.x = ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
+      mousePos.current.y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
+    };
+
+    const handleClick = () => {
+      if (gamePhaseRef.current === 'building' && currentBlockRef.current) {
+        dropCurrentBlock();
+      } else if (gamePhaseRef.current === 'placing_lemon' && !lemonRef.current.placed) {
+        placeLemon();
+      }
+    };
+
+    const handleTouch = (e: TouchEvent) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const touch = e.touches[0];
+      mousePos.current.x = ((touch.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
+      mousePos.current.y = ((touch.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    canvasRef.current?.addEventListener('mousemove', handleMouseMove);
+    canvasRef.current?.addEventListener('click', handleClick);
+    canvasRef.current?.addEventListener('touchmove', handleTouch);
+    canvasRef.current?.addEventListener('touchstart', handleClick);
+
     return () => {
-        window.removeEventListener('keydown', handleKeyDown);
-        window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      canvasRef.current?.removeEventListener('mousemove', handleMouseMove);
+      canvasRef.current?.removeEventListener('click', handleClick);
+      canvasRef.current?.removeEventListener('touchmove', handleTouch);
+      canvasRef.current?.removeEventListener('touchstart', handleClick);
     };
   }, []);
 
-  const resetLevel = () => {
-      playerRef.current = { x: 1, y: 1, alive: true };
-      enemiesRef.current = [];
-      bombsRef.current = [];
-      explosionsRef.current = [];
-      scoreRef.current = 0;
-      
-      const newGrid: (string | null)[][] = [];
-      for(let y=0; y<GRID_H; y++) {
-          const row: (string | null)[] = [];
-          for(let x=0; x<GRID_W; x++) {
-              if (x===0 || x===GRID_W-1 || y===0 || y===GRID_H-1 || (x%2===0 && y%2===0)) {
-                  row.push('WALL');
-              } else if (Math.random() < 0.3 && !(x<3 && y<3)) {
-                  row.push('BOX');
-              } else {
-                  row.push(null);
-                  if (Math.random() < 0.05 && !(x<3 && y<3)) {
-                      enemiesRef.current.push({ id: Math.random(), x, y, alive: true, dir: Math.floor(Math.random()*4) });
-                  }
-              }
-          }
-          newGrid.push(row);
+  const resetGame = () => {
+    blocksRef.current = [];
+    scoreRef.current = 0;
+    heightRef.current = 0;
+    balanceRef.current = 100;
+    gamePhaseRef.current = 'building';
+    explosionTimerRef.current = 0;
+    lemonRef.current = { x: CANVAS_WIDTH / 2, y: 50, placed: false };
+    blockIdRef.current = 0;
+    spawnNewBlock();
+    setGameState(GameState.PLAYING);
+  };
+
+  const spawnNewBlock = () => {
+    const type = BOOK_TYPES[Math.floor(Math.random() * BOOK_TYPES.length)];
+    currentBlockRef.current = {
+      id: blockIdRef.current++,
+      x: CANVAS_WIDTH / 2,
+      y: 80,
+      width: type.width,
+      height: type.height,
+      color: type.color,
+      bookType: type.name,
+      points: type.points,
+      velocity: { x: 0, y: 0 },
+      rotation: 0,
+      settled: false,
+    };
+  };
+
+  const dropCurrentBlock = () => {
+    if (!currentBlockRef.current) return;
+
+    const block = currentBlockRef.current;
+    block.x = mousePos.current.x;
+    blocksRef.current.push(block);
+    audioService.playShoot();
+
+    setTimeout(() => {
+      spawnNewBlock();
+    }, 500);
+    currentBlockRef.current = null;
+  };
+
+  const placeLemon = () => {
+    // Find the highest point to place lemon
+    let highestY = GROUND_Y;
+    let lemonX = mousePos.current.x;
+
+    blocksRef.current.forEach(block => {
+      if (block.settled) {
+        const blockTop = block.y - block.height / 2;
+        if (blockTop < highestY &&
+            mousePos.current.x > block.x - block.width / 2 &&
+            mousePos.current.x < block.x + block.width / 2) {
+          highestY = blockTop;
+          lemonX = block.x;
+        }
       }
-      gridRef.current = newGrid;
-      setGameState(GameState.PLAYING);
+    });
+
+    lemonRef.current = {
+      x: lemonX,
+      y: highestY - 15,
+      placed: true
+    };
+
+    audioService.playExp();
+
+    // Start explosion sequence
+    setTimeout(() => {
+      gamePhaseRef.current = 'exploding';
+      explosionTimerRef.current = 180; // 3 seconds
+    }, 1000);
   };
 
-  const placeBomb = () => {
-      const p = playerRef.current;
-      if (bombsRef.current.some(b => b.x === p.x && b.y === p.y)) return;
-      bombsRef.current.push({ id: Math.random(), x: p.x, y: p.y, timer: 120 }); // 2 seconds
-      audioService.playShoot();
-  };
+  const calculateScore = () => {
+    // Calculate tower height
+    let minY = GROUND_Y;
+    blocksRef.current.forEach(block => {
+      if (block.settled) {
+        const blockTop = block.y - block.height / 2;
+        if (blockTop < minY) minY = blockTop;
+      }
+    });
 
-  const explode = (bx: number, by: number) => {
-      const range = 2;
-      const hits: {x: number, y: number}[] = [{x: bx, y: by}];
-      
-      [[0,1], [0,-1], [1,0], [-1,0]].forEach(([dx, dy]) => {
-          for(let i=1; i<=range; i++) {
-              const tx = bx + dx*i;
-              const ty = by + dy*i;
-              if (tx < 0 || tx >= GRID_W || ty < 0 || ty >= GRID_H) break;
-              if (gridRef.current[ty][tx] === 'WALL') break;
-              hits.push({x: tx, y: ty});
-              if (gridRef.current[ty][tx] === 'BOX') {
-                  gridRef.current[ty][tx] = null;
-                  scoreRef.current += 10;
-                  break; // Stop at box
-              }
-          }
-      });
+    const height = GROUND_Y - minY;
+    heightRef.current = Math.floor(height);
 
-      hits.forEach(h => {
-          explosionsRef.current.push({ x: h.x, y: h.y, life: 30 });
-          // Check Player
-          if (playerRef.current.x === h.x && playerRef.current.y === h.y) {
-              playerRef.current.alive = false;
-              setGameState(GameState.GAME_OVER);
-              audioService.playGameOver();
-          }
-          // Check Enemies
-          enemiesRef.current.forEach(e => {
-              if (e.alive && e.x === h.x && e.y === h.y) {
-                  e.alive = false;
-                  scoreRef.current += 100;
-                  audioService.playHit();
-              }
-          });
-      });
-      audioService.playExp();
+    // Calculate balance (how centered the tower is)
+    let totalX = 0;
+    let count = 0;
+    blocksRef.current.forEach(block => {
+      if (block.settled) {
+        totalX += block.x;
+        count++;
+      }
+    });
+    const avgX = count > 0 ? totalX / count : CANVAS_WIDTH / 2;
+    const centerOffset = Math.abs(avgX - CANVAS_WIDTH / 2);
+    balanceRef.current = Math.max(0, 100 - centerOffset / 2);
+
+    // Final score
+    const baseScore = blocksRef.current.reduce((sum, b) => sum + (b.settled ? b.points : 0), 0);
+    const heightBonus = Math.floor(height * 2);
+    const balanceBonus = Math.floor(balanceRef.current);
+    const lemonBonus = lemonRef.current.placed ? 100 : 0;
+
+    scoreRef.current = baseScore + heightBonus + balanceBonus + lemonBonus;
   };
 
   const update = () => {
-      if (gameState !== GameState.PLAYING) return;
-      const now = Date.now();
-      
-      // Player Move
-      if (now - lastMoveTime.current > 150 && playerRef.current.alive) {
-          let dx = 0, dy = 0;
-          if (keysPressed.current['ArrowUp'] || keysPressed.current['KeyW']) dy = -1;
-          else if (keysPressed.current['ArrowDown'] || keysPressed.current['KeyS']) dy = 1;
-          else if (keysPressed.current['ArrowLeft'] || keysPressed.current['KeyA']) dx = -1;
-          else if (keysPressed.current['ArrowRight'] || keysPressed.current['KeyD']) dx = 1;
-          
-          if (dx !== 0 || dy !== 0) {
-              const nx = playerRef.current.x + dx;
-              const ny = playerRef.current.y + dy;
-              if (nx >=0 && nx < GRID_W && ny >=0 && ny < GRID_H && !gridRef.current[ny][nx] && !bombsRef.current.some(b => b.x === nx && b.y === ny)) {
-                  playerRef.current.x = nx;
-                  playerRef.current.y = ny;
-                  lastMoveTime.current = now;
-              }
+    if (gameState !== GameState.PLAYING) return;
+
+    // Update current block position
+    if (currentBlockRef.current && gamePhaseRef.current === 'building') {
+      currentBlockRef.current.x = mousePos.current.x;
+      // Clamp to canvas
+      currentBlockRef.current.x = Math.max(
+        currentBlockRef.current.width / 2,
+        Math.min(CANVAS_WIDTH - currentBlockRef.current.width / 2, currentBlockRef.current.x)
+      );
+    }
+
+    // Update lemon position before placed
+    if (gamePhaseRef.current === 'placing_lemon' && !lemonRef.current.placed) {
+      lemonRef.current.x = mousePos.current.x;
+    }
+
+    // Physics for dropped blocks
+    blocksRef.current.forEach(block => {
+      if (block.settled) return;
+
+      // Apply gravity
+      block.velocity.y += GRAVITY;
+      block.y += block.velocity.y;
+      block.x += block.velocity.x;
+      block.velocity.x *= FRICTION;
+
+      // Ground collision
+      if (block.y + block.height / 2 >= GROUND_Y) {
+        block.y = GROUND_Y - block.height / 2;
+        block.velocity.y = 0;
+        block.settled = true;
+        audioService.playHit();
+      }
+
+      // Collision with other blocks
+      blocksRef.current.forEach(other => {
+        if (other.id === block.id || !other.settled) return;
+
+        // Simple AABB collision
+        const dx = block.x - other.x;
+        const dy = block.y - other.y;
+        const overlapX = (block.width + other.width) / 2 - Math.abs(dx);
+        const overlapY = (block.height + other.height) / 2 - Math.abs(dy);
+
+        if (overlapX > 0 && overlapY > 0) {
+          // Collision detected
+          if (overlapY < overlapX) {
+            // Vertical collision (landing on top)
+            if (dy < 0) {
+              block.y = other.y - other.height / 2 - block.height / 2;
+              block.velocity.y = 0;
+              block.settled = true;
+              audioService.playHit();
+            }
+          } else {
+            // Horizontal collision (slide off)
+            block.x += dx > 0 ? overlapX : -overlapX;
+            block.velocity.x = dx > 0 ? 2 : -2;
           }
-      }
-
-      if (keysPressed.current['Space'] || keysPressed.current['KeyZ']) {
-          if (playerRef.current.alive) placeBomb();
-          keysPressed.current['Space'] = false; // Prevent spam
-          keysPressed.current['KeyZ'] = false;
-      }
-
-      // Bombs
-      bombsRef.current.forEach(b => {
-          b.timer--;
-          if (b.timer <= 0) explode(b.x, b.y);
+        }
       });
-      bombsRef.current = bombsRef.current.filter(b => b.timer > 0);
 
-      // Explosions
-      explosionsRef.current.forEach(e => e.life--);
-      explosionsRef.current = explosionsRef.current.filter(e => e.life > 0);
-
-      // Enemies
-      if (Math.random() < 0.05) {
-          enemiesRef.current.forEach(e => {
-              if (!e.alive) return;
-              const dirs = [[0,1], [0,-1], [1,0], [-1,0]];
-              // 50% chance to follow player
-              if (Math.random() < 0.5) {
-                  if (playerRef.current.x > e.x) e.dir = 2;
-                  if (playerRef.current.x < e.x) e.dir = 3;
-                  if (playerRef.current.y > e.y) e.dir = 0;
-                  if (playerRef.current.y < e.y) e.dir = 1;
-              } else if (Math.random() < 0.2) {
-                  e.dir = Math.floor(Math.random()*4);
-              }
-
-              const [dx, dy] = dirs[e.dir];
-              const nx = e.x + dx;
-              const ny = e.y + dy;
-              
-              if (nx >=0 && nx < GRID_W && ny >=0 && ny < GRID_H && !gridRef.current[ny][nx] && !bombsRef.current.some(b => b.x === nx && b.y === ny)) {
-                   e.x = nx;
-                   e.y = ny;
-                   if (e.x === playerRef.current.x && e.y === playerRef.current.y) {
-                       playerRef.current.alive = false;
-                       setGameState(GameState.GAME_OVER);
-                       audioService.playGameOver();
-                   }
-              }
-          });
+      // Wall collision
+      if (block.x - block.width / 2 < 0) {
+        block.x = block.width / 2;
+        block.velocity.x = Math.abs(block.velocity.x) * 0.5;
       }
-      enemiesRef.current = enemiesRef.current.filter(e => e.alive);
-
-      // Win Condition
-      if (enemiesRef.current.length === 0) {
-           setGameState(GameState.VICTORY);
+      if (block.x + block.width / 2 > CANVAS_WIDTH) {
+        block.x = CANVAS_WIDTH - block.width / 2;
+        block.velocity.x = -Math.abs(block.velocity.x) * 0.5;
       }
+    });
 
-      // Stats Update
-      setStats({
-          wave: 1,
-          score: scoreRef.current,
-          kills: 0,
-          timeElapsed: 0,
-      });
+    // Explosion phase
+    if (gamePhaseRef.current === 'exploding') {
+      explosionTimerRef.current--;
+      if (explosionTimerRef.current <= 0) {
+        calculateScore();
+        gamePhaseRef.current = 'result';
+
+        if (scoreRef.current >= 300) {
+          setGameState(GameState.VICTORY);
+        } else {
+          // Continue or show result
+          setGameState(GameState.VICTORY);
+        }
+      }
+    }
+
+    // Update stats
+    calculateScore();
+    setStats({
+      wave: 1,
+      score: scoreRef.current,
+      kills: blocksRef.current.filter(b => b.settled).length,
+      timeElapsed: 0,
+    });
   };
 
   const draw = (ctx: CanvasRenderingContext2D) => {
-      // BG
-      ctx.fillStyle = '#2d2a26';
+    // Background - Maruzen bookstore atmosphere (melancholic blue-grey)
+    const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+    gradient.addColorStop(0, '#1a1a2e');
+    gradient.addColorStop(0.5, '#16213e');
+    gradient.addColorStop(1, '#0f0f1a');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Bookshelf pattern in background
+    ctx.fillStyle = 'rgba(139, 69, 19, 0.1)';
+    for (let y = 0; y < CANVAS_HEIGHT; y += 100) {
+      ctx.fillRect(0, y, CANVAS_WIDTH, 3);
+    }
+    for (let x = 0; x < CANVAS_WIDTH; x += 50) {
+      ctx.fillStyle = `rgba(139, 69, 19, ${0.05 + Math.random() * 0.05})`;
+      ctx.fillRect(x, 0, 30, CANVAS_HEIGHT);
+    }
+
+    // Ground / Shelf
+    ctx.fillStyle = '#4a3728';
+    ctx.fillRect(0, GROUND_Y, CANVAS_WIDTH, SHELF_HEIGHT);
+    ctx.fillStyle = '#2d1f14';
+    ctx.fillRect(0, GROUND_Y, CANVAS_WIDTH, 5);
+
+    // Draw settled blocks
+    blocksRef.current.forEach(block => {
+      drawBook(ctx, block);
+    });
+
+    // Draw current block (preview)
+    if (currentBlockRef.current && gamePhaseRef.current === 'building') {
+      ctx.globalAlpha = 0.7;
+      drawBook(ctx, currentBlockRef.current);
+      ctx.globalAlpha = 1;
+
+      // Drop guide line
+      ctx.strokeStyle = '#ffea00';
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(currentBlockRef.current.x, currentBlockRef.current.y + currentBlockRef.current.height / 2);
+      ctx.lineTo(currentBlockRef.current.x, GROUND_Y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Draw lemon
+    if (gamePhaseRef.current === 'placing_lemon' || lemonRef.current.placed) {
+      drawLemon(ctx, lemonRef.current.x, lemonRef.current.y, lemonRef.current.placed);
+    }
+
+    // Explosion effect
+    if (gamePhaseRef.current === 'exploding') {
+      const progress = 1 - explosionTimerRef.current / 180;
+
+      // Radial explosion from lemon
+      const radius = progress * 400;
+      const explosionGradient = ctx.createRadialGradient(
+        lemonRef.current.x, lemonRef.current.y, 0,
+        lemonRef.current.x, lemonRef.current.y, radius
+      );
+      explosionGradient.addColorStop(0, `rgba(255, 234, 0, ${0.8 * (1 - progress)})`);
+      explosionGradient.addColorStop(0.3, `rgba(255, 165, 0, ${0.6 * (1 - progress)})`);
+      explosionGradient.addColorStop(0.6, `rgba(255, 69, 0, ${0.4 * (1 - progress)})`);
+      explosionGradient.addColorStop(1, 'transparent');
+
+      ctx.fillStyle = explosionGradient;
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-      // Grid
-      for(let y=0; y<GRID_H; y++) {
-          for(let x=0; x<GRID_W; x++) {
-              const px = x * CELL_SIZE;
-              const py = y * CELL_SIZE;
-              const cell = gridRef.current[y][x];
-              
-              if (cell === 'WALL') {
-                  const s = spriteCacheRef.current['WALL'];
-                  if(s) ctx.drawImage(s, px, py, CELL_SIZE, CELL_SIZE);
-                  else { ctx.fillStyle = '#555'; ctx.fillRect(px, py, CELL_SIZE, CELL_SIZE); }
-              } else if (cell === 'BOX') {
-                  const s = spriteCacheRef.current['BOX'];
-                  if(s) ctx.drawImage(s, px, py, CELL_SIZE, CELL_SIZE);
-                  else { ctx.fillStyle = '#8b4513'; ctx.fillRect(px, py, CELL_SIZE, CELL_SIZE); }
-              }
-          }
+      // Flying particles
+      for (let i = 0; i < 20; i++) {
+        const angle = (i / 20) * Math.PI * 2 + progress * 2;
+        const dist = radius * 0.8;
+        const px = lemonRef.current.x + Math.cos(angle) * dist;
+        const py = lemonRef.current.y + Math.sin(angle) * dist;
+
+        ctx.fillStyle = `rgba(255, 234, 0, ${1 - progress})`;
+        ctx.fillRect(px - 3, py - 3, 6, 6);
       }
+    }
 
-      // Bombs
-      bombsRef.current.forEach(b => {
-          const s = spriteCacheRef.current['LEMON'];
-          const px = b.x * CELL_SIZE;
-          const py = b.y * CELL_SIZE;
-          const scale = 1 + Math.sin(Date.now() * 0.02) * 0.1;
-          if(s) ctx.drawImage(s, px, py, CELL_SIZE, CELL_SIZE);
-      });
+    // UI overlay
+    drawUI(ctx);
+  };
 
-      // Explosions
-      explosionsRef.current.forEach(e => {
-          const s = spriteCacheRef.current['EXPLOSION'];
-          const px = e.x * CELL_SIZE;
-          const py = e.y * CELL_SIZE;
-          if(s) ctx.drawImage(s, px, py, CELL_SIZE, CELL_SIZE);
-      });
+  const drawBook = (ctx: CanvasRenderingContext2D, block: BookBlock) => {
+    const { x, y, width, height, color } = block;
 
-      // Enemies
-      enemiesRef.current.forEach(e => {
-          const s = spriteCacheRef.current['CRITIC'];
-          const px = e.x * CELL_SIZE;
-          const py = e.y * CELL_SIZE;
-          if(s) ctx.drawImage(s, px, py, CELL_SIZE, CELL_SIZE);
-      });
+    // Book shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.fillRect(x - width / 2 + 3, y - height / 2 + 3, width, height);
 
-      // Player
-      if (playerRef.current.alive) {
-          const s = spriteCacheRef.current['PLAYER'];
-          const px = playerRef.current.x * CELL_SIZE;
-          const py = playerRef.current.y * CELL_SIZE;
-          if(s) ctx.drawImage(s, px, py - 5, CELL_SIZE, CELL_SIZE + 5);
-      }
+    // Book body
+    ctx.fillStyle = color;
+    ctx.fillRect(x - width / 2, y - height / 2, width, height);
+
+    // Book spine highlight
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.fillRect(x - width / 2, y - height / 2, 4, height);
+
+    // Book edge shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.fillRect(x + width / 2 - 3, y - height / 2, 3, height);
+
+    // Book lines (pages)
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.fillRect(x - width / 2 + 6, y - height / 2 + 2, width - 10, 1);
+    ctx.fillRect(x - width / 2 + 6, y + height / 2 - 3, width - 10, 1);
+  };
+
+  const drawLemon = (ctx: CanvasRenderingContext2D, x: number, y: number, placed: boolean) => {
+    // Lemon glow
+    if (placed) {
+      const glowGradient = ctx.createRadialGradient(x, y, 0, x, y, 40);
+      glowGradient.addColorStop(0, 'rgba(255, 234, 0, 0.5)');
+      glowGradient.addColorStop(1, 'transparent');
+      ctx.fillStyle = glowGradient;
+      ctx.fillRect(x - 40, y - 40, 80, 80);
+    }
+
+    // Lemon body
+    ctx.fillStyle = '#ffd700';
+    ctx.beginPath();
+    ctx.ellipse(x, y, 18, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Lemon highlight
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.beginPath();
+    ctx.ellipse(x - 5, y - 3, 6, 4, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Lemon tips
+    ctx.fillStyle = '#9acd32';
+    ctx.beginPath();
+    ctx.ellipse(x - 18, y, 4, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x + 18, y, 4, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pulsing effect when not placed
+    if (!placed) {
+      const pulse = Math.sin(Date.now() * 0.005) * 0.2 + 0.8;
+      ctx.strokeStyle = `rgba(255, 234, 0, ${pulse})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 25, 18, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  };
+
+  const drawUI = (ctx: CanvasRenderingContext2D) => {
+    // Phase indicator
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(10, 10, 200, 80);
+    ctx.strokeStyle = '#00f5ff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(10, 10, 200, 80);
+
+    ctx.font = '12px "Press Start 2P", monospace';
+    ctx.fillStyle = '#00f5ff';
+
+    if (gamePhaseRef.current === 'building') {
+      ctx.fillText('STACK BOOKS', 20, 35);
+      ctx.fillStyle = '#ffea00';
+      ctx.font = '10px "Press Start 2P", monospace';
+      ctx.fillText('CLICK/SPACE: DROP', 20, 55);
+      ctx.fillText('ENTER: PLACE LEMON', 20, 75);
+    } else if (gamePhaseRef.current === 'placing_lemon') {
+      ctx.fillText('PLACE LEMON', 20, 35);
+      ctx.fillStyle = '#ff2d95';
+      ctx.font = '10px "Press Start 2P", monospace';
+      ctx.fillText('ON TOP OF TOWER', 20, 55);
+      ctx.fillText('CLICK TO PLACE', 20, 75);
+    } else if (gamePhaseRef.current === 'exploding') {
+      ctx.fillStyle = '#ffea00';
+      ctx.fillText('EXPLOSION!', 20, 50);
+    }
+
+    // Score display
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(CANVAS_WIDTH - 160, 10, 150, 100);
+    ctx.strokeStyle = '#ff2d95';
+    ctx.strokeRect(CANVAS_WIDTH - 160, 10, 150, 100);
+
+    ctx.font = '10px "Press Start 2P", monospace';
+    ctx.fillStyle = '#ffea00';
+    ctx.fillText(`SCORE`, CANVAS_WIDTH - 150, 30);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(`${scoreRef.current}`, CANVAS_WIDTH - 150, 50);
+
+    ctx.fillStyle = '#00f5ff';
+    ctx.fillText(`HEIGHT`, CANVAS_WIDTH - 150, 70);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(`${heightRef.current}px`, CANVAS_WIDTH - 150, 90);
+
+    ctx.fillStyle = '#39ff14';
+    ctx.fillText(`BOOKS: ${blocksRef.current.filter(b => b.settled).length}`, CANVAS_WIDTH - 150, 105);
   };
 
   const loop = useCallback(() => {
     update();
     const ctx = canvasRef.current?.getContext('2d');
-    if (ctx) { ctx.imageSmoothingEnabled = false; draw(ctx); }
+    if (ctx) {
+      ctx.imageSmoothingEnabled = false;
+      draw(ctx);
+    }
     requestRef.current = requestAnimationFrame(loop);
   }, [gameState]);
 
   useEffect(() => {
     requestRef.current = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(requestRef.current!);
+    return () => cancelAnimationFrame(requestRef.current);
   }, [gameState, loop]);
 
   return (
@@ -318,7 +564,7 @@ export const LemonGame: React.FC<LemonGameProps> = ({ gameState, setGameState, s
       ref={canvasRef}
       width={CANVAS_WIDTH}
       height={CANVAS_HEIGHT}
-      className="block bg-neutral-900 shadow-2xl mx-auto rounded-sm"
+      className="block bg-neutral-900 shadow-2xl mx-auto rounded-sm cursor-crosshair"
       style={{ width: '100%', maxWidth: '800px', imageRendering: 'pixelated' }}
     />
   );

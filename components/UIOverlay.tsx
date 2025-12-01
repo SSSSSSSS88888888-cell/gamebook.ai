@@ -1,5 +1,5 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { GameState, GameStats, Player, WeaponType, UpgradeOption, UpgradeType, PlayerStats } from '../types';
 import { WEAPON_DEFINITIONS, COLORS, BOOK_QUOTES, LIBRARY } from '../constants';
 import { audioService } from '../services/audioService';
@@ -17,9 +17,71 @@ interface UIOverlayProps {
   selectedBookId: string | null;
 }
 
+// Tutorial content for each game
+const TUTORIALS: Record<string, { title: string; controls: { key: string; action: string }[]; tips: string[] }> = {
+  ningen: {
+    title: '人間失格',
+    controls: [
+      { key: 'WASD / 矢印', action: '移動' },
+      { key: 'マウス', action: '攻撃方向' },
+      { key: 'クリック', action: '攻撃' },
+      { key: 'SPACE', action: '回避（ダッシュ）' },
+      { key: 'ESC', action: 'ポーズ' }
+    ],
+    tips: [
+      '敵を倒してEXPを集めレベルアップ！',
+      '新しい武器やスキルを選択して強化',
+      'Wave 10ごとにボス出現'
+    ]
+  },
+  lemon: {
+    title: '檸檬',
+    controls: [
+      { key: '← →', action: '本を左右に移動' },
+      { key: 'SPACE / ↓', action: '本を落とす' },
+      { key: 'クリック', action: '檸檬を置く' }
+    ],
+    tips: [
+      '本を積み上げてタワーを作れ！',
+      '最後に檸檬を頂上に置いて爆破',
+      '高く積むほど高スコア'
+    ]
+  },
+  social_contract: {
+    title: '社会契約論',
+    controls: [
+      { key: 'クリック', action: '市民を移動' },
+      { key: 'ドラッグ', action: '範囲選択' }
+    ],
+    tips: [
+      '市民を集結させて「一般意志」を高めろ！',
+      'CONTRACT状態でダメージ最大',
+      '王の攻撃から市民を守れ'
+    ]
+  }
+};
+
 export const UIOverlay: React.FC<UIOverlayProps> = ({
   gameState, stats, player, onStartGameSelect, onStartGame, onSelectUpgrade, onRestart, onResume, onReadNovel, selectedBookId
 }) => {
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [tutorialDismissed, setTutorialDismissed] = useState<Record<string, boolean>>({});
+
+  // Show tutorial on first play of each game
+  useEffect(() => {
+    if (gameState === GameState.PLAYING && selectedBookId && stats.wave === 1 && stats.timeElapsed > 40) {
+      const key = selectedBookId || 'ningen';
+      if (!tutorialDismissed[key]) {
+        setShowTutorial(true);
+      }
+    }
+  }, [gameState, selectedBookId, stats.wave, stats.timeElapsed, tutorialDismissed]);
+
+  const dismissTutorial = () => {
+    const key = selectedBookId || 'ningen';
+    setTutorialDismissed(prev => ({ ...prev, [key]: true }));
+    setShowTutorial(false);
+  };
   const hpPercent = Math.max(0, (player.hp / player.stats.maxHp) * 100);
   const expPercent = Math.max(0, (player.exp / player.nextLevelExp) * 100);
   const isDefaultGame = !selectedBookId || selectedBookId === 'ningen';
@@ -306,8 +368,75 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
   // --- PLAYING / HUD ---
   if (gameState === GameState.PLAYING || gameState === GameState.LEVEL_UP || gameState === GameState.VICTORY) {
+    const tutorial = TUTORIALS[selectedBookId || 'ningen'];
+
     return (
       <>
+        {/* Tutorial Overlay */}
+        {showTutorial && tutorial && (
+          <div className="absolute inset-0 bg-black/90 flex items-center justify-center z-[100] pointer-events-auto animate-in fade-in duration-300">
+            <div
+              className="max-w-md w-full mx-4 p-6 relative"
+              style={{
+                background: 'linear-gradient(180deg, #1a0a3e 0%, #0a0a2e 100%)',
+                border: '3px solid #00f5ff',
+                boxShadow: '0 0 30px #00f5ff55, inset 0 0 20px #00f5ff11'
+              }}
+            >
+              {/* Title */}
+              <div className="text-center mb-6">
+                <h2 className="font-pixel text-lg text-[#ffea00] neon-yellow-glow mb-2">HOW TO PLAY</h2>
+                <p className="font-pixel text-sm text-[#ff2d95] neon-pink-glow">{tutorial.title}</p>
+              </div>
+
+              {/* Controls */}
+              <div className="mb-6">
+                <h3 className="font-pixel text-[10px] text-[#39ff14] mb-3 neon-text" style={{ color: '#39ff14' }}>★ CONTROLS ★</h3>
+                <div className="space-y-2">
+                  {tutorial.controls.map((ctrl, i) => (
+                    <div key={i} className="flex justify-between items-center">
+                      <span
+                        className="font-pixel text-[10px] px-2 py-1 bg-black/50"
+                        style={{ border: '2px solid #bf00ff', color: '#bf00ff' }}
+                      >
+                        {ctrl.key}
+                      </span>
+                      <span className="font-pixel text-[10px] text-[#00f5ff]">{ctrl.action}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Tips */}
+              <div className="mb-6">
+                <h3 className="font-pixel text-[10px] text-[#39ff14] mb-3 neon-text" style={{ color: '#39ff14' }}>★ TIPS ★</h3>
+                <ul className="space-y-2">
+                  {tutorial.tips.map((tip, i) => (
+                    <li key={i} className="font-pixel text-[9px] text-white flex items-start gap-2">
+                      <span className="text-[#ffea00]">▶</span>
+                      <span>{tip}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Start Button */}
+              <button
+                onClick={dismissTutorial}
+                className="w-full pixel-btn text-[#00f5ff] border-2 border-[#00f5ff] py-3 hover:bg-[#00f5ff]/20 transition-colors"
+              >
+                <span className="blink">▶</span> START GAME
+              </button>
+
+              {/* Corner accents */}
+              <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-[#ff2d95]"></div>
+              <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-[#00f5ff]"></div>
+              <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-[#00f5ff]"></div>
+              <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-[#ff2d95]"></div>
+            </div>
+          </div>
+        )}
+
         {stats.bossHp !== undefined && stats.bossMaxHp && (
           <div className="absolute top-12 left-1/2 -translate-x-1/2 w-3/4 z-20 pointer-events-none">
              <div className="w-full h-3 bg-black/80 border-2 border-[#ff2d95] relative" style={{ boxShadow: '0 0 10px #ff2d9555' }}>
@@ -506,6 +635,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
   }
 
   if (gameState === GameState.PAUSED) {
+    const tutorial = TUTORIALS[selectedBookId || 'ningen'];
     return (
       <div className="absolute inset-0 bg-black/95 flex flex-col items-center justify-center z-50 text-white">
         <h2 className="font-pixel text-2xl text-[#ffea00] mb-8 neon-yellow-glow">PAUSED</h2>
@@ -513,10 +643,31 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
           <button onClick={onResume} className="pixel-btn text-[#00f5ff] border-2 border-[#00f5ff] px-8 py-3 hover:bg-[#00f5ff]/20 transition-colors">
             ▶ RESUME
           </button>
-          <button onClick={onRestart} className="font-pixel text-xs text-[#ff2d95] hover:text-[#ff6b35] transition-colors">
+          <button
+            onClick={() => { setShowTutorial(true); onResume(); }}
+            className="pixel-btn text-[#39ff14] border-2 border-[#39ff14] px-8 py-3 hover:bg-[#39ff14]/20 transition-colors"
+          >
+            ? HELP
+          </button>
+          <button onClick={onRestart} className="font-pixel text-xs text-[#ff2d95] hover:text-[#ff6b35] transition-colors mt-4">
             ✕ QUIT GAME
           </button>
         </div>
+
+        {/* Quick Controls Reference */}
+        {tutorial && (
+          <div className="mt-8 p-4 bg-black/50 border border-[#bf00ff]/30 max-w-xs">
+            <h3 className="font-pixel text-[10px] text-[#bf00ff] mb-3 text-center">CONTROLS</h3>
+            <div className="space-y-1">
+              {tutorial.controls.slice(0, 3).map((ctrl, i) => (
+                <div key={i} className="flex justify-between text-[8px]">
+                  <span className="text-[#ffea00]">{ctrl.key}</span>
+                  <span className="text-gray-400">{ctrl.action}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
